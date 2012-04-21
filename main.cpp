@@ -255,6 +255,7 @@ int main ( void )
     delete [] buffer;
     int buf_sz = 1489;
     buffer = new char[buf_sz];
+    memset(buffer, 0, buf_sz);
     for(int i = 0; i < (SECTORS_PER_BLOCK + 1); i++)
     {
       printf("reading %d, file %d\n", i, 0);
@@ -449,67 +450,72 @@ int FileClose(int fd)
 
 int FileRead(int fd, void* buffer, int len)
 {
-  if(open_files.mode[fd] != 0)
+  int file_index = get_open_file_index(fd, &open_files);
+  if(file_index == -1 || open_files.mode[file_index] != 0)
     return 0;
   #ifdef __FILE_READ_DEBUG__
   printf("reading file %d\n", fd);
   #endif
-
-  unsigned int srcPos = 0;
-  int sizeToRead = 0;
-  int file_index = get_open_file_index(fd, &open_files);
+  //inde suboru v tabulke otvorenych suborov
+  //spravim si buffer, do ktoreho budem vsetko kopirovat
   unsigned char* temp_buf = new unsigned char[len];
-  memset(temp_buf, 0, len * sizeof(unsigned char));
-  int buff_pos = open_files.buff_pos[file_index] % BLOCK_SIZE;
-  unsigned int current_block = current_dir->files[fd].start;
-  int limit = open_files.buff_pos[file_index] / SECTORS_PER_BLOCK;
-  limit /= SECTOR_SIZE;
+  memset(temp_buf, 0, len);
+  //kde som v konecnom bufferi
+  int destPos = 0;
+  //velkost, ktoru musim nacitat
+  int size_to_read = 0;
+  //musime sa dostat na blok, odkial musime citat
+  int rel_block = open_files.buff_pos[file_index] / SECTORS_PER_BLOCK;
+  rel_block /= SECTOR_SIZE;
+  int block = current_dir->files[fd].start;
+
+  //kde presne sme v ramci bloku
   #ifdef __FILE_READ_DEBUG__
-  printf("my buf is on %d, file buf on %d, limit is %d, file length: %d\n", buff_pos, open_files.buff_pos[file_index], limit, current_dir->files[fd].size);
+  printf("the relative block is: %d\n", rel_block);
   #endif
-  //musime sa dostat este na ten blok, z ktoreho musime citat
-  for(int i = 0; i < (limit); i++)
+  for(int i = 0; i < rel_block; i++)
+    block = current_table->blocks[block];
+  int pos_in_block = open_files.buff_pos[file_index] - rel_block * BLOCK_SIZE;
+  //nacitavam, kym je co citat - bud kym nedosiahnem dlzku suboru, alebo kym nenaplnim buffer, ktory mi bol poskytnuty
+  while(open_files.buff_pos[file_index] < current_dir->files[fd].size && destPos < len)
   {
-    current_block = current_table->blocks[current_block];
-  }
-  //skoncime bud ked uz precitame vseky byty zo suboru, alebo ked naplnime buffer
-  while(open_files.buff_pos[file_index] < current_dir->files[fd].size && srcPos < len)
-  {
-    sizeToRead = ((current_dir->files[fd].size - open_files.buff_pos[file_index]) < (len - srcPos)) ? (current_dir->files[fd].size - open_files.buff_pos[file_index]) : (len - srcPos);
+    int upper_limit = (BLOCK_SIZE < (current_dir->files[fd].size - rel_block * BLOCK_SIZE)) ? BLOCK_SIZE : (current_dir->files[fd].size - rel_block * BLOCK_SIZE);
+    //velkost na citanie je bud na naplnenie buffera velkosti bloku, laebo buffera velkosti suboru, ktorekolvek je mensie
+    size_to_read = ((upper_limit - pos_in_block) < (len - destPos)) ? ((upper_limit - pos_in_block)) :  (len - destPos);
     #ifdef __FILE_READ_DEBUG__
-    printf("reading %d bytes\n", sizeToRead);
+    printf("size to read %d from block %d\n", size_to_read, block);
     #endif
-    //nacitame blok z bufferu
-    read_block(open_files.buffers[file_index], current_block*SECTORS_PER_BLOCK, &current_table->blockDevice);
-    //a teraz prekopirujeme to, co chceme
-    memcpy(temp_buf + buff_pos, open_files.buffers[file_index]->block + srcPos, sizeToRead);
+    //nacitame blok
+    read_block(open_files.buffers[file_index], block * SECTORS_PER_BLOCK, &current_table->blockDevice);
+    memcpy(temp_buf + destPos, open_files.buffers[file_index]->block + pos_in_block, size_to_read);
     #ifdef __FILE_READ_DEBUG__
-    printf("copying from pos %d to pos %d\n", srcPos, buff_pos);
+    printf("copied from position %d in src buffer to position %d in dest buffer\n", pos_in_block, destPos);
     #endif
-    open_files.buff_pos[file_index] += sizeToRead;
-    srcPos += sizeToRead;
-    buff_pos += sizeToRead;
-    if(buff_pos == BLOCK_SIZE)
+    pos_in_block += size_to_read;
+    open_files.buff_pos[file_index] += size_to_read;
+    destPos += size_to_read;
+    if(pos_in_block == BLOCK_SIZE)
     {
-      current_block = current_table->blocks[current_block];
-      buff_pos = 0;
+      pos_in_block = 0;
+      block = current_table->blocks[block];
+      rel_block++;
     }
   }
-  memcpy(buffer, temp_buf, sizeToRead);
   delete [] temp_buf;
-  return sizeToRead;
+  memcpy(buffer, temp_buf, destPos);
+  return destPos;
 }
 
 int FileWrite(int fd, const void* buffer, int len)
 {
-  if(open_files.mode[fd] != 1)
+  int file_index = get_open_file_index(fd, &open_files);
+  if(file_index == -1 || open_files.mode[fd] != 1)
     return 0;
   #ifdef __FILE_WRITE_DEBUG__
   printf("writing file %d\n", fd);
   #endif
   int srcPos = 0;
   int sizeToWrite = 0;
-  int file_index = get_open_file_index(fd, &open_files);
   unsigned char* temp_buf = new unsigned char[len];
   memcpy(temp_buf, buffer, len * sizeof(unsigned char));
   while(srcPos != len)
