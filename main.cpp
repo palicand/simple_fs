@@ -9,17 +9,6 @@ using namespace std;
 #define SECTOR_SIZE         512
 #define DEVICE_SIZE_MAX     ( 1024 * 1024 * 1024 )
 #define DEVICE_SIZE_MIN     ( 8 * 1024 * 1024 )
-#define EOC 0xFFFFFFFF
-#define SYS 0xFFFFFFFE
-#define SECTORS_PER_BLOCK 8
-#define BLOCK_SIZE SECTORS_PER_BLOCK * SECTOR_SIZE
-#define MAGIC_NUMBER 42
-#define __DEBUG__
-//#define __CONVERT__
-//#define __DIR_TEST__
-#define __FILE_FIND_DEBUG__
-#define __CREATE_FILE_DEBUG__
-
 struct TFile
  {
    char            m_FileName[FILENAME_LEN_MAX + 1];
@@ -32,18 +21,31 @@ struct TBlkDev
    int          (* m_Read)( int, void *, int );
    int          (* m_Write)( int, const void *, int );
  };
-
+#endif /* __PROGTEST__ */
+#define EOC 0xFFFFFFFF
+#define SYS 0xFFFFFFFE
+#define SECTORS_PER_BLOCK 8
+#define BLOCK_SIZE SECTORS_PER_BLOCK * SECTOR_SIZE
+#define MAGIC_NUMBER 42
+//#define __DEBUG__
+//#define __CONVERT__
+#define __DIR_TEST__
+#define __FILE_FIND_DEBUG__
+#define __CREATE_FILE_DEBUG__
+#define __FILE_WRITE_DEBUG__
+#define __FILE_CLOSE_DEBUG__
+#define __FILE_READ_DEBUG__
  struct TBlock
  {
   unsigned char block[BLOCK_SIZE];
  };
 
+//start oznacuje startovny blok, size je velkost v bytoch
 struct TEntry 
 {
   unsigned int size;
   unsigned int start;
   char filename[FILENAME_LEN_MAX+1];
-  bool opened;
 };
 
  struct TFat
@@ -65,15 +67,20 @@ struct TDir
   unsigned int files_total;
 };
 
-struct TFileBuffers
+//ked sa otvori subor, jeho adresa v pamati sa zapise do files, vytvori sa mu novy buffer na jeho pozicii vo files a jeho fd sa zapise do fd[pos_files]
+struct TOpenFiles
 {
-  TBlock buffers[OPEN_FILES_MAX];
-  int free_buffers[OPEN_FILES_MAX];
+  TEntry* files[OPEN_FILES_MAX];
+  TBlock* buffers[OPEN_FILES_MAX];
+  int fd[OPEN_FILES_MAX];
+  unsigned int block_to_write[OPEN_FILES_MAX];
+  unsigned int buff_pos[OPEN_FILES_MAX];
+  int mode[OPEN_FILES_MAX];
 };
+
 TFat* current_table;
 TDir* current_dir;
-TFileBuffers buffers;
-#endif /* __PROGTEST__ */
+TOpenFiles open_files;
 int FsCreate(struct TBlkDev * dev);
 int     FsMount( struct TBlkDev * dev );
 int     FsUmount( void );
@@ -103,7 +110,7 @@ int     FileSize            ( const char     * fileName );
  * main(), however, the tests are incomplete. Once again, this is only a starting point.
  */
 
-#define DISK_SECTORS DEVICE_SIZE_MIN/ 512
+#define DISK_SECTORS DEVICE_SIZE_MIN / 512
 static FILE  * g_Fp = NULL;
 
 //-------------------------------------------------------------------------------------------------
@@ -198,11 +205,20 @@ void               doneDisk                                ( TBlkDev         * d
     }
  }
 //-------------------------------------------------------------------------------------------------
+
+ void printbuf(char* buf, int len)
+ {
+  for(int i = 0; i < len; i++)
+  {
+    printf("%c", buf[i]);
+  }
+  printf("\n");
+ }
 int main ( void )
  {
    TBlkDev * dev;
    int       i, fd, retCode;
-   char      buffer [SECTOR_SIZE];
+   char* buffer = new char[SECTOR_SIZE];
    TFile     info;
 
    /* create the disk before we use it
@@ -216,12 +232,46 @@ int main ( void )
     FsCreate(dev);
     retCode = FsMount(dev);
     printf("Mount: %d\n", retCode);
-    retCode = FileOpen("test.txt", 0);
+    retCode = FileOpen("test.txt", 1);
     printf("open 1, %d\n", retCode);
-    retCode = FileOpen("test2.txt", 1);
-    printf("open 2, %d\n", retCode);
-    retCode = FileOpen("test3.txt", 0);
-    printf("open 2, %d\n", retCode);
+    memset(buffer, 'a', (SECTOR_SIZE) * sizeof(char));
+    for(int i = 0; i < (SECTORS_PER_BLOCK + 1); i++)
+    {
+      printf("write %d of size 512\n", i);
+      FileWrite(retCode, buffer, SECTOR_SIZE);
+    }
+    retCode = FileOpen("arabjekkt", 1);
+    memset(buffer, 'b', (SECTOR_SIZE - 1));
+    for(int i = 0; i < 3; i++)
+    {
+      printf("bytes written %d\n", FileWrite(retCode, buffer, (SECTOR_SIZE - 1)));
+    }
+    FileClose(0);
+    FileClose(1);
+    int f1, f2;
+    f1 = FileOpen("test.txt", 0);
+    f2 = FileOpen("arabjekkt", 0);
+    int sz;
+    delete [] buffer;
+    int buf_sz = 1489;
+    buffer = new char[buf_sz];
+    for(int i = 0; i < (SECTORS_PER_BLOCK + 1); i++)
+    {
+      printf("reading %d, file %d\n", i, 0);
+      sz = FileRead(f1, buffer, buf_sz);
+      printf("bytes read: %d\n", sz);
+      if(sz != 0)
+        printbuf(buffer, sz);
+      printf("file %d\n", 1);
+      sz = FileRead(f2, buffer, buf_sz);
+      printf("bytes read: %d\n", sz);
+      if(sz != 0)
+        printbuf(buffer, sz);
+    }
+    delete []buffer;
+    FileClose(0);
+    FileClose(1);
+    FsUmount();
     doneDisk(dev);
 
    return 0;
@@ -240,8 +290,8 @@ void fill_block(TBlock* block, const unsigned int* data, int size);
 //naplnime block charom
 void fill_block(TBlock* block, const unsigned char* data, int size);
 //zapisanie bloku src od sektoru start_sector na device dev
-void write_block(const TBlock* src, int start_sector, const TBlkDev* dev);
-void read_block(TBlock* dest, int start_sector, const TBlkDev* dev);
+int write_block(const TBlock* src, int start_sector, const TBlkDev* dev);
+int read_block(TBlock* dest, int start_sector, const TBlkDev* dev);
 void init_block(TBlock* block) { memset(block->block, 0, sizeof(unsigned char)* BLOCK_SIZE); }
 //pomocne blbosti
 //prevod uintu src na pole 4 unsigned charov, aby sme to mohli zapisat - pouzitie v zapise fatky; format little endian
@@ -277,19 +327,41 @@ int create_file(const char* filename);
 int find_free_fd(const char* filename, int start = 0);
 int find_free_block(int start = 0);
 
+void init_open_files(TOpenFiles* of_table);
+
+//prida subor do tabulky otvorenych suborov, v pripade uspechu vracia FD, v pripade neuspechu -1
+int add_to_open_files(int fd, TOpenFiles* of_table);
+void close_files(TOpenFiles* of_table);
+int get_free_index(const TOpenFiles* of_table);
+
+int flush_buffer(int fd, const TOpenFiles* of_table);
+void remove_from_open_files(int fd, TOpenFiles* of_table);
+
+void clear_file(int fd);
+void remove_from_table(int fd);
+int get_open_file_index(int fd, const TOpenFiles* of_table) 
+{ 
+  int i = 0; 
+  while(i < OPEN_FILES_MAX && of_table->fd[i] != fd)
+    i++;
+  if(i == OPEN_FILES_MAX)
+    return -1;
+  return i;
+}
+
  int FsCreate(struct TBlkDev * dev)
 {
   TFat* table = new TFat;
   init_fat(table, dev);
   write_fat(table);
   #ifdef __DEBUG__
-  printf("\n%u;%u;%u\n", sizeof(TEntry), sizeof(TDir), sizeof(TFat));
+  printf("\n%llu;%llu;%llu\n", sizeof(TEntry), sizeof(TDir), sizeof(TFat));
   #endif
   TDir* root = new TDir;
 
   #ifdef __DEBUG__
   printf("\n%u %u\n", table->dir_start, table->data_start);
-  printf("%d, %d, %d, %d\n", dev->m_Sectors, SECTORS_PER_BLOCK, sizeof(unsigned int), BLOCK_SIZE);
+  printf("%d, %d, %lu, %d\n", dev->m_Sectors, SECTORS_PER_BLOCK, sizeof(unsigned int), BLOCK_SIZE);
   #endif
 
   init_dir(root);
@@ -318,6 +390,7 @@ int FsMount(TBlkDev* dev)
     return 0;
   current_table = table;
   current_dir = root;
+  init_open_files(&open_files);
   return 1;
 }
 
@@ -325,10 +398,13 @@ int FsUmount()
 {
   write_fat(current_table);
   write_dir(current_dir, &current_table->blockDevice, current_table->dir_start, current_table->buffer);
-  close_files(current_dir);
+  close_files(&open_files);
   destroy_fat(current_table);
+  delete current_dir;
+  delete current_table;
   current_table = NULL;
   current_dir = NULL;
+  return 1;
 }
 
 int FileOpen(const char* filename, int writeMode)
@@ -343,12 +419,157 @@ int FileOpen(const char* filename, int writeMode)
   if(fd == -1)
   {
     //subor otvarany pre citanie neexistuje, vraciame chybu
-    if(writeMode == 1)
+    if(writeMode == 0)
       return fd;
     fd = create_file(filename);
   }
-  current_dir->files[fd].opened = true;
-  return fd;
+  else
+  {
+    if(writeMode == 1)
+    {
+      clear_file(fd);
+    }
+  }
+  open_files.mode[fd] = writeMode;
+  return add_to_open_files(fd, &open_files);
+}
+
+int FileClose(int fd)
+{
+  #ifdef __FILE_CLOSE_DEBUG__
+    printf("closing file %d\n", fd);
+  #endif
+  //vyprazdnime buffer
+  if(open_files.mode[fd] == 1)
+    flush_buffer(fd, &open_files);
+  //a subor odstranime z tabulky a upraceme
+  remove_from_open_files(fd, &open_files);
+  return 1;
+}
+
+int FileRead(int fd, void* buffer, int len)
+{
+  if(open_files.mode[fd] != 0)
+    return 0;
+  #ifdef __FILE_READ_DEBUG__
+  printf("reading file %d\n", fd);
+  #endif
+
+  unsigned int srcPos = 0;
+  int sizeToRead = 0;
+  int file_index = get_open_file_index(fd, &open_files);
+  unsigned char* temp_buf = new unsigned char[len];
+  memset(temp_buf, 0, len * sizeof(unsigned char));
+  int buff_pos = open_files.buff_pos[file_index] % BLOCK_SIZE;
+  unsigned int current_block = current_dir->files[fd].start;
+  int limit = open_files.buff_pos[file_index] / SECTORS_PER_BLOCK;
+  limit /= SECTOR_SIZE;
+  #ifdef __FILE_READ_DEBUG__
+  printf("my buf is on %d, file buf on %d, limit is %d, file length: %d\n", buff_pos, open_files.buff_pos[file_index], limit, current_dir->files[fd].size);
+  #endif
+  //musime sa dostat este na ten blok, z ktoreho musime citat
+  for(int i = 0; i < (limit); i++)
+  {
+    current_block = current_table->blocks[current_block];
+  }
+  //skoncime bud ked uz precitame vseky byty zo suboru, alebo ked naplnime buffer
+  while(open_files.buff_pos[file_index] < current_dir->files[fd].size && srcPos < len)
+  {
+    sizeToRead = ((current_dir->files[fd].size - open_files.buff_pos[file_index]) < (len - srcPos)) ? (current_dir->files[fd].size - open_files.buff_pos[file_index]) : (len - srcPos);
+    #ifdef __FILE_READ_DEBUG__
+    printf("reading %d bytes\n", sizeToRead);
+    #endif
+    //nacitame blok z bufferu
+    read_block(open_files.buffers[file_index], current_block*SECTORS_PER_BLOCK, &current_table->blockDevice);
+    //a teraz prekopirujeme to, co chceme
+    memcpy(temp_buf + buff_pos, open_files.buffers[file_index]->block + srcPos, sizeToRead);
+    #ifdef __FILE_READ_DEBUG__
+    printf("copying from pos %d to pos %d\n", srcPos, buff_pos);
+    #endif
+    open_files.buff_pos[file_index] += sizeToRead;
+    srcPos += sizeToRead;
+    buff_pos += sizeToRead;
+    if(buff_pos == BLOCK_SIZE)
+    {
+      current_block = current_table->blocks[current_block];
+      buff_pos = 0;
+    }
+  }
+  memcpy(buffer, temp_buf, sizeToRead);
+  delete [] temp_buf;
+  return sizeToRead;
+}
+
+int FileWrite(int fd, const void* buffer, int len)
+{
+  if(open_files.mode[fd] != 1)
+    return 0;
+  #ifdef __FILE_WRITE_DEBUG__
+  printf("writing file %d\n", fd);
+  #endif
+  int srcPos = 0;
+  int sizeToWrite = 0;
+  int file_index = get_open_file_index(fd, &open_files);
+  unsigned char* temp_buf = new unsigned char[len];
+  memcpy(temp_buf, buffer, len * sizeof(unsigned char));
+  while(srcPos != len)
+  {
+    /*musime zistit, kolko zo zdrojoveho bufferu nakopirujeme do nasho, musi to byt velkost, ktora co najviac naplni nas buffer,
+    ale zaroven nepreiahneme velkost zdrojoveho... ak je teda velkost zdrojoveho bufferu este dostatocne velka, kopirujem tolko, 
+    kolko mi chyba po okraj mojho bufferu (BLOCK_SIZE - buff_pos), ale ak nie je, tak berem proste to, co mi zostava v zdrojovom bufferi
+    */
+    sizeToWrite = ((BLOCK_SIZE - open_files.buff_pos[file_index]) < (len - srcPos)) ? (BLOCK_SIZE - open_files.buff_pos[file_index]) : (len - srcPos);
+    #ifdef __FILE_WRITE_DEBUG__
+    printf("will write %d bytes, to bufpos %d from srcpos %d\n", sizeToWrite, open_files.buff_pos[file_index], srcPos);
+    #endif
+    memcpy(open_files.buffers[file_index]->block + open_files.buff_pos[file_index], temp_buf + srcPos, sizeToWrite);
+    open_files.buff_pos[file_index] += sizeToWrite;
+    srcPos += sizeToWrite;
+    //naplnili sme buffer
+    if(open_files.buff_pos[file_index] == BLOCK_SIZE)
+    {
+      //teraz hu musime zapisat na disk a to na poziciu, na ktorej akurat sme, kedze ta j evzdy prazdna
+      int ret;
+      if((ret = flush_buffer(file_index, &open_files)) != SECTORS_PER_BLOCK)
+      {
+        #ifdef __FILE_WRITE_DEBUG__
+        printf("wrote %d bytes while flushing\n", ret);
+        #endif
+        current_dir->files[fd].size += srcPos;
+        return srcPos;
+      }
+      //dostaneme ziskame novy blok
+      int new_block = find_free_block();
+      #ifdef __FILE_WRITE_DEBUG__
+      printf("got new block %d\n", new_block);
+      #endif
+      //nie su ziadne volne bloky uz
+      if(new_block == -1)
+      {
+        current_dir->files[fd].size += srcPos;
+        return srcPos;
+      }
+      //na sucastnom bloku nastavime odkaz na dalsi blok, kde file pokracuje
+      current_table->blocks[open_files.block_to_write[file_index]] = new_block;
+      open_files.block_to_write[file_index] = new_block;
+      //do noveho bloku nastavime EOC
+      current_table->blocks[open_files.block_to_write[file_index]] = EOC;
+      open_files.buff_pos[file_index] = 0;
+    }
+  }
+  delete [] temp_buf;
+  current_dir->files[fd].size += srcPos;
+  return srcPos;
+}
+
+int FileDelete(const char* fileName )
+{
+  int fd = find_file(fileName);
+  if(fd == -1)
+    return 0;
+  clear_file(fd);
+  remove_from_table(fd);
+  return 1;
 }
 
 void init_fat(TFat* table, const TBlkDev* dev)
@@ -416,20 +637,20 @@ void fill_block(TBlock* block, const unsigned int* data, int size)
 }
 
 
-void write_block(const TBlock* src, int start_sector, const TBlkDev* dev)
+int write_block(const TBlock* src, int start_sector, const TBlkDev* dev)
 {
   #ifdef __DEBUG__
   printf("writing from sector %d to sector %d, total sectors: %d\n", start_sector, start_sector + SECTORS_PER_BLOCK, dev->m_Sectors);
   #endif
-  dev->m_Write(start_sector, src->block, SECTORS_PER_BLOCK);
+  return dev->m_Write(start_sector, src->block, SECTORS_PER_BLOCK);
 }
 
-void read_block(TBlock* dest, int start_sector, const TBlkDev* dev)
+int read_block(TBlock* dest, int start_sector, const TBlkDev* dev)
 {
   #ifdef __DEBUG__
   printf("reading from sector %d to sector %d, total sectors: %d\n", start_sector, start_sector + SECTORS_PER_BLOCK, dev->m_Sectors);
   #endif
-  dev->m_Read(start_sector, dest, SECTORS_PER_BLOCK);
+  return dev->m_Read(start_sector, dest, SECTORS_PER_BLOCK);
 }
 
 void init_dir(TDir* dir)
@@ -486,8 +707,6 @@ bool read_fat_info(TFat* fat, const TBlkDev* dev, TBlock* buffer)
   }
   return true;
 }
-
-
 
 bool read_fat(TFat* fat, const TBlkDev* dev)
 {
@@ -577,8 +796,8 @@ int create_file(const char* filename)
 
   //kedze subor nema ziaden obsah zatial, bude koncit na svojom startovnom sektore
   current_table->blocks[start_block] = EOC;
-  //nastavime sector, ktory dostaneme, ked vynasobime adresu bloku poctom sektorov na blok
-  current_dir->files[fd].start = start_block * SECTORS_PER_BLOCK;
+  //nastavime cluster
+  current_dir->files[fd].start = start_block;
   current_dir->files[fd].size = 0;
   strcpy(current_dir->files[fd].filename, filename);
   current_dir->files_total++;
@@ -607,4 +826,123 @@ int find_free_block(int start)
   if(start == current_table->allocated_size)
     return -1;
   return start;
+}
+
+void init_open_files(TOpenFiles* of_table)
+{
+  memset(of_table->buffers, NULL, sizeof(TBlock*) * OPEN_FILES_MAX);
+  memset(of_table->files, NULL, sizeof(TEntry*) * OPEN_FILES_MAX);
+  memset(of_table->fd, -1, sizeof(*of_table->fd) * OPEN_FILES_MAX);
+  memset(of_table->block_to_write, -1, sizeof(*of_table->block_to_write) * OPEN_FILES_MAX);
+  memset(of_table->buff_pos, 0, sizeof(*of_table->buff_pos) * OPEN_FILES_MAX);
+}
+
+#ifdef __CREATE_FILE_DEBUG__
+void printOTable(const TOpenFiles* of_table)
+{
+  for(int i = 0; i < OPEN_FILES_MAX; i++)
+  {
+    printf("%d, fd:%d\n", i, of_table->fd[i]);
+  }
+}
+#endif
+
+int add_to_open_files(int fd, TOpenFiles* of_table)
+{
+  #ifdef __CREATE_FILE_DEBUG__
+  printOTable(of_table);
+  #endif
+  int index = get_free_index(of_table);
+  #ifdef __CREATE_FILE_DEBUG__
+  printf("got index %d\n", index);
+  #endif
+  //nebolo volne miesto pre otvoreny subor
+  if(index == -1)
+    return -1;
+  #ifdef __CREATE_FILE_DEBUG__
+  printf("adding file %d to table\n", fd);
+  #endif
+  of_table->buffers[index] = new TBlock;
+  init_block(of_table->buffers[index]);
+  of_table->files[index] = &current_dir->files[fd];
+  of_table->fd[index] = fd;
+  of_table->block_to_write[index] = of_table->files[index]->start;
+  #ifdef __CREATE_FILE_DEBUG__
+  printf("after add\n");
+  printOTable(of_table);
+  #endif
+  return fd;
+}
+
+
+int get_free_index(const TOpenFiles* of_table)
+{
+  int i = 0;
+  while(i < OPEN_FILES_MAX && of_table->fd[i] != -1)
+    i++;
+  if(i == OPEN_FILES_MAX)
+    return -1;
+  return i;
+}
+
+void close_files(TOpenFiles* of_table)
+{
+  for(int i = 0; i < OPEN_FILES_MAX; i++)
+  {
+    if(of_table->fd[i] != -1)
+    {
+      #ifdef __FILE_CLOSE_DEBUG__
+      printf("closing file %d\n", of_table->fd[i]);
+      #endif
+     FileClose(i);
+    }
+  }
+}
+
+int flush_buffer(int fd, const TOpenFiles* of_table)
+{
+  unsigned int file_index = get_open_file_index(fd, of_table);
+  #ifdef __FILE_WRITE_DEBUG__
+  printf("flushing buffer of %d in sector %lu\n", fd, of_table->block_to_write[file_index]*SECTORS_PER_BLOCK);
+  #endif
+  int size_written = write_block(of_table->buffers[file_index], of_table->block_to_write[file_index]*SECTORS_PER_BLOCK, &current_table->blockDevice);
+  init_block(of_table->buffers[file_index]);
+  return size_written;
+}
+
+void remove_from_open_files(int fd, TOpenFiles* of_table)
+{
+  int file_index = get_open_file_index(fd, of_table);
+  #ifdef __FILE_CLOSE_DEBUG__
+  printf("removing file %d from of_table, position %d\n", fd, file_index);
+  #endif
+  of_table->block_to_write[file_index] = -1;
+  of_table->buff_pos[file_index] = 0;
+  of_table->fd[file_index] = -1;
+  of_table->files[file_index] = NULL;
+  delete of_table->buffers[file_index];
+  of_table->buffers[file_index] = NULL;
+}
+
+void clear_file(int fd)
+{
+  int current_block = current_dir->files[fd].start;
+  int next_block = current_table->blocks[current_block];
+  while(next_block != EOC)
+  {
+    current_table->blocks[current_block] = 0;
+    current_block = next_block;
+    next_block = current_table->blocks[current_block];
+  }
+  current_table->blocks[current_block] = 0;
+  current_table->blocks[current_dir->files[fd].start] = EOC;
+}
+
+void remove_from_table(int fd)
+{
+  //pred volanim tejto funkcie sme volali cear_file, takze zostava uz len zaciatocny blok, ten vynulujeme
+  current_table->blocks[current_dir->files[fd].start] = 0;
+  current_dir->files[fd].size = -1;
+  current_dir->files[fd].start = -1;
+  memset(current_dir->files[fd].filename, '\0', (FILENAME_LEN_MAX + 1) * sizeof(char));
 }
