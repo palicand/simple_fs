@@ -1,7 +1,9 @@
 #ifndef __PROGTEST__
 #include <cstdio>
 #include <cstdlib>
+#include <iostream>
 #include <cstring>
+#include <ctime>
 using namespace std;
 #define FILENAME_LEN_MAX    28
 #define DIR_ENTRIES_MAX     128
@@ -27,14 +29,14 @@ struct TBlkDev
 #define SECTORS_PER_BLOCK 8
 #define BLOCK_SIZE SECTORS_PER_BLOCK * SECTOR_SIZE
 #define MAGIC_NUMBER 42
-//#define __DEBUG__
+#define __DEBUG__
 //#define __CONVERT__
-#define __DIR_TEST__
-#define __FILE_FIND_DEBUG__
+//#define __DIR_TEST__
+/*#define __FILE_FIND_DEBUG__
 #define __CREATE_FILE_DEBUG__
 #define __FILE_WRITE_DEBUG__
 #define __FILE_CLOSE_DEBUG__
-#define __FILE_READ_DEBUG__
+#define __FILE_READ_DEBUG__*/
  struct TBlock
  {
   unsigned char block[BLOCK_SIZE];
@@ -76,6 +78,7 @@ struct TOpenFiles
   unsigned int block_to_write[OPEN_FILES_MAX];
   unsigned int buff_pos[OPEN_FILES_MAX];
   int mode[OPEN_FILES_MAX];
+  int last_file;
 };
 
 TFat* current_table;
@@ -230,50 +233,142 @@ int main ( void )
     * First, try to create the filesystem
     */
     FsCreate(dev);
-    retCode = FsMount(dev);
-    printf("Mount: %d\n", retCode);
-    retCode = FileOpen("test.txt", 1);
-    printf("open 1, %d\n", retCode);
-    memset(buffer, 'a', (SECTOR_SIZE) * sizeof(char));
-    for(int i = 0; i < (SECTORS_PER_BLOCK + 1); i++)
-    {
-      printf("write %d of size 512\n", i);
-      FileWrite(retCode, buffer, SECTOR_SIZE);
-    }
-    retCode = FileOpen("arabjekkt", 1);
-    memset(buffer, 'b', (SECTOR_SIZE - 1));
-    for(int i = 0; i < 3; i++)
-    {
-      printf("bytes written %d\n", FileWrite(retCode, buffer, (SECTOR_SIZE - 1)));
-    }
-    FileClose(0);
-    FileClose(1);
-    int f1, f2;
-    f1 = FileOpen("test.txt", 0);
-    f2 = FileOpen("arabjekkt", 0);
-    int sz;
-    delete [] buffer;
-    int buf_sz = 1489;
-    buffer = new char[buf_sz];
-    memset(buffer, 0, buf_sz);
-    for(int i = 0; i < (SECTORS_PER_BLOCK + 1); i++)
-    {
-      printf("reading %d, file %d\n", i, 0);
-      sz = FileRead(f1, buffer, buf_sz);
-      printf("bytes read: %d\n", sz);
-      if(sz != 0)
-        printbuf(buffer, sz);
-      printf("file %d\n", 1);
-      sz = FileRead(f2, buffer, buf_sz);
-      printf("bytes read: %d\n", sz);
-      if(sz != 0)
-        printbuf(buffer, sz);
-    }
-    delete []buffer;
-    FileClose(0);
-    FileClose(1);
-    FsUmount();
-    doneDisk(dev);
+            cout << "\n-------------------------------------------------" << endl;
+        retCode = FsMount( dev );
+        cout << "FsMount " << retCode << endl;
+        char *bufferik;
+       
+        cout << "Zapis najednou, nahodna velikost souboru:\n---------------" << endl;
+        srand( time( NULL ) );
+        int max = rand() % 100000 + rand() % 20000, velikost, j = 0;
+        int temp = max;
+        char *spravne2 = new char[ max ];
+        fd = FileOpen( "hjsDFHJK", 1 );
+        velikost = max;
+        bufferik = new char[ velikost ];
+        for( int i = 0; i < velikost; i++ )
+                spravne2[ i ] = bufferik[ i ] = rand() % 255;
+        cout << FileWrite( fd, bufferik, velikost ) << endl;
+        max -= velikost;
+        delete [] bufferik;
+        FileClose( fd );
+       
+        cout << "\nNahodny zapis, fixni velikost souboru 3022B:\n---------------" << endl;
+        srand( time( NULL ) );
+        max = 3022, velikost, j = 0;
+        char *spravne = new char[ max ];
+        fd = FileOpen( "apoisdiajwsSNHF", 1 );
+        while( max > 512 )
+        {
+                cout << "Bajty " << j << "-" << j+velikost << endl;
+                velikost = rand() % 512 + 1;
+                bufferik = new char[ velikost ];
+                for( int i = 0; i < velikost; i++, j++ )
+                        spravne[ j ] = bufferik[ i ] = rand() % 255;
+                FileWrite( fd, bufferik, velikost );
+                max -= velikost;
+                delete [] bufferik;
+        }
+        velikost = max;
+        bufferik = new char[ velikost ];
+        for( int i = 0; i < velikost; i++, j++ )
+                spravne[ j ] = bufferik[ i ] = rand() % 255;
+        FileWrite( fd, bufferik, velikost );
+        max -= velikost;
+        delete [] bufferik;
+        FileClose( fd );
+       
+        cout << "\nTest zapisu, (cteni najednou), fixni velikost souboru 3022B:\n---------------" << endl;
+        fd = FileOpen( "apoisdiajwsSNHF", 0 );
+        cout << "FileSize: " << " r=3022, s=" << FileSize( "apoisdiajwsSNHF" ) << endl;
+        velikost = 3022;
+        bufferik = new char[ velikost ];
+        cout << FileRead( fd, bufferik, velikost ) << endl;
+        cout << "Bajty " << 0 << "-" << velikost << endl;
+        for( int i = 0; i < velikost; i++ )
+                if( spravne[ i ] != bufferik[ i ] )
+                        cout << "+offset " << i << ", r=" << (int) spravne[ i ] << ", s= " << (int) bufferik[ i ] << endl;
+        delete [] bufferik;
+        FileClose( fd );
+       
+       
+        cout << "\nNahodny cteni, fixni velikost souboru 3022B:\n---------------" << endl;
+        max = 3022;
+        j = 0;
+        fd = FileOpen( "apoisdiajwsSNHF", 0 );
+        cout << "FileSize: " << " r=3022, s=" << FileSize( "apoisdiajwsSNHF" ) << endl;
+        while( max > 512 )
+        {
+                velikost = rand() % 512 + 1;
+                bufferik = new char[ velikost ];
+                cout << "Bajty " << j << "-" << j+velikost << endl;            
+                FileRead( fd, bufferik, velikost );
+                for( int i = 0; i < velikost; i++, j++ )
+                        if( spravne[ j ] != bufferik[ i ] )
+                                cout << "+offset " << j << ", r=" << (int) spravne[ j ] << ", s= " << (int) bufferik[ i ] << endl;
+                               
+                max -= velikost;
+                delete [] bufferik;
+        }
+        velikost = max;
+        bufferik = new char[ velikost ];
+        FileRead( fd, bufferik, velikost );
+        cout << "Bajty " << j << "-" << j+velikost << endl;    
+        for( int i = 0; i < velikost; i++, j++ )
+                if( spravne[ j ] != bufferik[ i ] )
+                        cout << "+offset " << j << ", r=" << (int) spravne[ j ] << ", s= " << (int) bufferik[ i ] << endl;     
+        max -= velikost;
+        delete [] bufferik;
+        FileClose( fd );
+       
+        cout << "\nTest zapisu, (cteni najednou), nahodna velikost souboru:\n---------------" << endl;
+        fd = FileOpen( "hjsDFHJK", 0 );
+        cout << "FileSize: " << " r="<< temp << ", s=" << FileSize( "hjsDFHJK" ) << endl;
+        velikost = temp;
+        bufferik = new char[ velikost ];
+        cout << FileRead( fd, bufferik, velikost ) << endl;
+        cout << "Bajty " << 0 << "-" << velikost << endl;
+        for( int i = 0; i < velikost; i++ )
+                if( spravne2[ i ] != bufferik[ i ] )
+                        cout << "+offset " << i << ", r=" << (int) spravne2[ i ] << ", s= " << (int) bufferik[ i ] << endl;
+        delete [] bufferik;
+        FileClose( fd );
+       
+       
+        cout << "\nNahodny cteni, nahodna velikost souboru:\n---------------" << endl;
+        max = temp;
+        j = 0;
+        fd = FileOpen( "hjsDFHJK", 0 );
+        cout << "FileSize: " << " r=" << temp << ", s=" << FileSize( "hjsDFHJK" ) << endl;
+        while( max > 512 )
+        {
+                velikost = rand() % (1024) + 1;
+                bufferik = new char[ velikost ];
+                cout << "Bajty " << j << "-" << j+velikost << endl;            
+                FileRead( fd, bufferik, velikost );
+                for( int i = 0; i < velikost; i++, j++ )
+                        if( spravne2[ j ] != bufferik[ i ] )
+                                cout << "+offset " << j << ", r=" << (int) spravne2[ j ] << ", s= " << (int) bufferik[ i ] << endl;
+                               
+                max -= velikost;
+                delete [] bufferik;
+        }
+        velikost = max;
+        bufferik = new char[ velikost ];
+        FileRead( fd, bufferik, velikost );
+        cout << "Bajty " << j << "-" << j+velikost << endl;    
+        for( int i = 0; i < velikost; i++, j++ )
+                if( spravne2[ j ] != bufferik[ i ] )
+                        cout << "+offset " << j << ", r=" << (int) spravne2[ j ] << ", s= " << (int) bufferik[ i ] << endl;    
+        max -= velikost;
+        delete [] bufferik;
+        FileClose( fd );
+       
+        retCode = FsUmount( );
+        cout << "FsUmount " << retCode << endl;
+       
+        doneDisk( dev );
+        delete [] spravne;
 
    return 0;
  }
@@ -340,7 +435,8 @@ void remove_from_open_files(int fd, TOpenFiles* of_table);
 
 void clear_file(int fd);
 void remove_from_table(int fd);
-int get_open_file_index(int fd, const TOpenFiles* of_table) 
+int find_first_from_last();
+int get_open_file_index(int fd, const TOpenFiles* of_table)
 { 
   int i = 0; 
   while(i < OPEN_FILES_MAX && of_table->fd[i] != fd)
@@ -451,8 +547,11 @@ int FileClose(int fd)
 int FileRead(int fd, void* buffer, int len)
 {
   int file_index = get_open_file_index(fd, &open_files);
-  if(file_index == -1 || open_files.mode[file_index] != 0)
+  if(file_index == -1)
+  {
+    printf("fileindex = -1\n");
     return 0;
+  }
   #ifdef __FILE_READ_DEBUG__
   printf("reading file %d\n", fd);
   #endif
@@ -501,8 +600,8 @@ int FileRead(int fd, void* buffer, int len)
       rel_block++;
     }
   }
-  delete [] temp_buf;
   memcpy(buffer, temp_buf, destPos);
+  delete [] temp_buf;
   return destPos;
 }
 
@@ -578,6 +677,35 @@ int FileDelete(const char* fileName )
   return 1;
 }
 
+int FileFindFirst(TFile* info)
+{
+  open_files.last_file = -1;
+  int file = find_first_from_last();
+  if(file == -1)
+    return 0;
+  strcpy(info->m_FileName, current_dir->files[file].filename);
+  info->m_FileSize = current_dir->files[file].size;
+  return 1;
+}
+
+int FileFindNext(TFile* info)
+{
+  int file = find_first_from_last();
+  if(file == -1)
+    return 0;
+  strcpy(info->m_FileName, current_dir->files[file].filename);
+  info->m_FileSize = current_dir->files[file].size;
+  return 1;
+}
+
+int FileSize ( const char     * fileName )
+{
+  int file = find_file(fileName);
+  if(file == -1)
+    return -1;
+  else return current_dir->files[file].size;
+}
+
 void init_fat(TFat* table, const TBlkDev* dev)
 {
   memset(table, 0, sizeof(*table));
@@ -592,6 +720,7 @@ void init_fat(TFat* table, const TBlkDev* dev)
   table->data_start = table->dir_start + 2*SECTORS_PER_BLOCK;
   // test
   table->buffer = new TBlock;
+  init_block(table->buffer);
   table->files_total = 0;
   for(unsigned i = 0; i < table->data_start / SECTORS_PER_BLOCK; i++)
   {
@@ -784,8 +913,9 @@ int find_file(const char* file_name)
 
 int create_file(const char* filename)
 {
+  current_dir->files_total = current_table->files_total;
   #ifdef __CREATE_FILE_DEBUG__
-  printf("creating file\n");
+  printf("creating file, total files: %d\n", current_dir->files_total);
   #endif
   if(current_dir->files_total == DIR_ENTRIES_MAX)
     return -1;
@@ -951,4 +1081,14 @@ void remove_from_table(int fd)
   current_dir->files[fd].size = -1;
   current_dir->files[fd].start = -1;
   memset(current_dir->files[fd].filename, '\0', (FILENAME_LEN_MAX + 1) * sizeof(char));
+}
+
+int find_first_from_last()
+{
+  open_files.last_file++;
+  while(open_files.last_file < DIR_ENTRIES_MAX && current_dir->files[open_files.last_file].start == -1)
+    open_files.last_file++;
+  if(open_files.last_file == DIR_ENTRIES_MAX)
+    return -1;
+  return open_files.last_file;
 }
