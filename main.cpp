@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <cstring>
+#include <fstream>
 #include <ctime>
 using namespace std;
 #define FILENAME_LEN_MAX    28
@@ -81,7 +82,7 @@ struct TOpenFiles
 
 TFat* current_table;
 TDir* current_dir;
-TOpenFiles open_files;
+TOpenFiles* open_files;
 int FsCreate(struct TBlkDev * dev);
 int     FsMount( struct TBlkDev * dev );
 int     FsUmount( void );
@@ -207,7 +208,7 @@ void randContent(char* buffer, int sz)
 {
   for(int i = 0; i < sz; i++)
   {
-    char c = rand() % 255 + 1;
+    char c = rand() % 90 + 38;
     buffer[i] = c;
   }
 }
@@ -237,7 +238,6 @@ void randFN(char* src)
      do 
       { 
         printf ( "%d: %s %d\n", i, info . m_FileName, info . m_FileSize );
-        cout << "retcode " << ret << endl;
         i++;
       } while ((ret = FileFindNext ( &info )) );
 
@@ -246,7 +246,7 @@ int main ( void )
  {
    TBlkDev * dev;
    int       fd, retCode;
-   char file[FILENAME_LEN_MAX + 1];
+   char file[FILENAME_LEN_MAX + 1], prevFile[FILENAME_LEN_MAX + 1];
    TFile info;
    /* create the disk before we use it
     */
@@ -265,23 +265,16 @@ int main ( void )
   printAllF();
   int sz;
   char* buffer;
-  for(int i = 0; i < 123; i++)
+  ofstream out("files");
+  int i = 0;
+  while(i < 10000)
   {
-    //cout << "iteration " << i << endl;
     randFN(file);
-    //printf("Filename: %s\n", file);
     fd = FileOpen(file, 1);
-    cout << "got fd " << fd << "total files: " << current_dir->files_total << endl;
     if(fd != -1)
     {
-      sz = rand() % 4096 + 1;
-      buffer = new char[sz];
-      randContent(buffer, sz);
-      //printf("content: ");
-      //printbuf(buffer, sz);
-      //printf("\n");
-      FileWrite(fd, buffer, sz);
-      delete [] buffer;
+      strcpy(prevFile, file);
+      cout << "open file " << file << ": " << fd << endl;
       sz = rand() % 4096 + 1;
       buffer = new char[sz];
       randContent(buffer, sz);
@@ -289,34 +282,20 @@ int main ( void )
       FileClose(fd);
       delete [] buffer;
     }
-  }
-  for(int i = 0; i < 5; i++)
-  {
-    randFN(file);
-    //printf("Filename: %s\n", file);
-    fd = FileOpen(file, 1);
-    cout << "got fd " << fd << "total files: " << current_dir->files_total << endl;
-    if(fd != -1)
+    if(current_dir->files_total > 0)
     {
-      sz = rand() % 4096 + 1;
-      buffer = new char[sz];
-      randContent(buffer, sz);
-      //printf("content: ");
-      //printbuf(buffer, sz);
-      //printf("\n");
-      FileWrite(fd, buffer, sz);
-      delete [] buffer;
-      sz = rand() % 4096 + 1;
-      buffer = new char[sz];
-      randContent(buffer, sz);
-      FileWrite(fd, buffer, sz);
-      delete [] buffer;
+      if((rand() % 2) == 1)
+        cout << "deleting file " << prevFile << ": " << FileDelete(prevFile) << endl;
+      else
+        out << prevFile << endl;
     }
+    i++;
   }
   printAllF();
   retCode = FsUmount( );
   cout << "FsUmount " << retCode << endl;
   doneDisk( dev );
+  out.close();
    return 0;
  }
 //manipulacia s FATkou
@@ -442,7 +421,8 @@ int FsMount(TBlkDev* dev)
   }
   current_table = table;
   current_dir = root;
-  init_open_files(&open_files);
+  open_files = new TOpenFiles;
+  init_open_files(open_files);
   return 1;
 }
 
@@ -453,12 +433,13 @@ int FsUmount()
   if(current_table->mounted == 0)
     return 0;
   current_table->mounted = 0;
-  close_files(&open_files);
+  close_files(open_files);
   write_dir(current_dir, &current_table->blockDevice, current_table->dir_start, current_table->buffer);
   write_fat(current_table);
   destroy_fat(current_table);
   delete current_dir;
   delete current_table;
+  delete open_files;
   current_table = NULL;
   current_dir = NULL;
   return 1;
@@ -494,34 +475,34 @@ int FileOpen(const char* filename, int writeMode)
     #endif
     return -1;
   }
-  int ret = add_to_open_files(fd, &open_files);
-  open_files.mode[get_open_file_index(fd, &open_files)] = writeMode;
+  int ret = add_to_open_files(fd, open_files);
+  open_files->mode[get_open_file_index(fd, open_files)] = writeMode;
   return ret;
 }
 
 int FileClose(int fd)
 {
-  int index = get_open_file_index(fd, &open_files);
+  int index = get_open_file_index(fd, open_files);
   #ifdef __ANOTHER_TEST__
   cout << "passed " << fd << "got " <<  index << "while closing " << endl;
   #endif
-  if(open_files.fd[index] == -1)
+  if(open_files->fd[index] == -1)
     return -1;
   #ifdef __FILE_CLOSE_DEBUG__
     printf("closing file %d\n", fd);
   #endif
   //vyprazdnime buffer
-  if(open_files.mode[index] == 1)
-    flush_buffer(fd, &open_files);
+  if(open_files->mode[index] == 1)
+    flush_buffer(fd, open_files);
   //a subor odstranime z tabulky a upraceme
-  remove_from_open_files(index, &open_files);
+  remove_from_open_files(index, open_files);
   return 1;
 }
 
 int FileRead(int fd, void* buffer, int len)
 {
-  int file_index = get_open_file_index(fd, &open_files);
-  if(file_index == -1 && open_files.mode[file_index] != 0)
+  int file_index = get_open_file_index(fd, open_files);
+  if(file_index == -1 && open_files->mode[file_index] != 0)
   {
     return 0;
   }
@@ -537,7 +518,7 @@ int FileRead(int fd, void* buffer, int len)
   //velkost, ktoru musim nacitat
   int size_to_read = 0;
   //musime sa dostat na blok, odkial musime citat
-  int rel_block = open_files.buff_pos[file_index] / SECTORS_PER_BLOCK;
+  int rel_block = open_files->buff_pos[file_index] / SECTORS_PER_BLOCK;
   rel_block /= SECTOR_SIZE;
   int block = current_dir->files[fd].start;
 
@@ -547,9 +528,9 @@ int FileRead(int fd, void* buffer, int len)
   #endif
   for(int i = 0; i < rel_block; i++)
     block = current_table->blocks[block];
-  int pos_in_block = open_files.buff_pos[file_index] - rel_block * BLOCK_SIZE;
+  int pos_in_block = open_files->buff_pos[file_index] - rel_block * BLOCK_SIZE;
   //nacitavam, kym je co citat - bud kym nedosiahnem dlzku suboru, alebo kym nenaplnim buffer, ktory mi bol poskytnuty
-  while(open_files.buff_pos[file_index] < current_dir->files[fd].size && destPos < len)
+  while(open_files->buff_pos[file_index] < current_dir->files[fd].size && destPos < len)
   {
     int upper_limit = (BLOCK_SIZE < (current_dir->files[fd].size - rel_block * BLOCK_SIZE)) ? BLOCK_SIZE : (current_dir->files[fd].size - rel_block * BLOCK_SIZE);
     //velkost na citanie je bud na naplnenie buffera velkosti bloku, laebo buffera velkosti suboru, ktorekolvek je mensie
@@ -558,13 +539,13 @@ int FileRead(int fd, void* buffer, int len)
     printf("size to read %d from block %d\n", size_to_read, block);
     #endif
     //nacitame blok
-    read_block(open_files.buffers[file_index], block * SECTORS_PER_BLOCK, &current_table->blockDevice);
-    memcpy((unsigned char*) buffer + destPos, open_files.buffers[file_index]->block + pos_in_block, size_to_read);
+    read_block(open_files->buffers[file_index], block * SECTORS_PER_BLOCK, &current_table->blockDevice);
+    memcpy((unsigned char*) buffer + destPos, open_files->buffers[file_index]->block + pos_in_block, size_to_read);
     #ifdef __FILE_READ_DEBUG__
     printf("copied from position %d in src buffer to position %d in dest buffer\n", pos_in_block, destPos);
     #endif
     pos_in_block += size_to_read;
-    open_files.buff_pos[file_index] += size_to_read;
+    open_files->buff_pos[file_index] += size_to_read;
     destPos += size_to_read;
     if(pos_in_block == BLOCK_SIZE)
     {
@@ -581,8 +562,8 @@ int FileRead(int fd, void* buffer, int len)
 
 int FileWrite(int fd, const void* buffer, int len)
 {
-  int file_index = get_open_file_index(fd, &open_files);
-  if(file_index == -1 || open_files.mode[file_index] != 1)
+  int file_index = get_open_file_index(fd, open_files);
+  if(file_index == -1 || open_files->mode[file_index] != 1)
     return 0;
   #ifdef __FILE_WRITE_DEBUG__
   printf("writing file %d\n", fd);
@@ -597,19 +578,19 @@ int FileWrite(int fd, const void* buffer, int len)
     ale zaroven nepreiahneme velkost zdrojoveho... ak je teda velkost zdrojoveho bufferu este dostatocne velka, kopirujem tolko, 
     kolko mi chyba po okraj mojho bufferu (BLOCK_SIZE - buff_pos), ale ak nie je, tak berem proste to, co mi zostava v zdrojovom bufferi
     */
-    sizeToWrite = ((BLOCK_SIZE - open_files.buff_pos[file_index]) < (len - srcPos)) ? (BLOCK_SIZE - open_files.buff_pos[file_index]) : (len - srcPos);
+    sizeToWrite = ((BLOCK_SIZE - open_files->buff_pos[file_index]) < (len - srcPos)) ? (BLOCK_SIZE - open_files->buff_pos[file_index]) : (len - srcPos);
     #ifdef __FILE_WRITE_DEBUG__
     printf("will write %d bytes, to bufpos %d from srcpos %d\n", sizeToWrite, open_files.buff_pos[file_index], srcPos);
     #endif
-    memcpy(open_files.buffers[file_index]->block + open_files.buff_pos[file_index], (unsigned char*)buffer + srcPos, sizeToWrite);
-    open_files.buff_pos[file_index] += sizeToWrite;
+    memcpy(open_files->buffers[file_index]->block + open_files->buff_pos[file_index], (unsigned char*)buffer + srcPos, sizeToWrite);
+    open_files->buff_pos[file_index] += sizeToWrite;
     srcPos += sizeToWrite;
     //naplnili sme buffer
-    if(open_files.buff_pos[file_index] == BLOCK_SIZE)
+    if(open_files->buff_pos[file_index] == BLOCK_SIZE)
     {
       //teraz hu musime zapisat na disk a to na poziciu, na ktorej akurat sme, kedze ta j evzdy prazdna
       int ret;
-      if((ret = flush_buffer(fd, &open_files)) != SECTORS_PER_BLOCK)
+      if((ret = flush_buffer(fd, open_files)) != SECTORS_PER_BLOCK)
       {
         #ifdef __FILE_WRITE_DEBUG__
         printf("wrote %d bytes while flushing\n", ret);
@@ -631,11 +612,11 @@ int FileWrite(int fd, const void* buffer, int len)
         return srcPos;
       }
       //na sucastnom bloku nastavime odkaz na dalsi blok, kde file pokracuje
-      current_table->blocks[open_files.block_to_write[file_index]] = new_block;
-      open_files.block_to_write[file_index] = new_block;
+      current_table->blocks[open_files->block_to_write[file_index]] = new_block;
+      open_files->block_to_write[file_index] = new_block;
       //do noveho bloku nastavime EOC
-      current_table->blocks[open_files.block_to_write[file_index]] = EOC;
-      open_files.buff_pos[file_index] = 0;
+      current_table->blocks[open_files->block_to_write[file_index]] = EOC;
+      open_files->buff_pos[file_index] = 0;
     }
   }
   //delete [] temp_buf;
@@ -650,12 +631,13 @@ int FileDelete(const char* fileName )
     return 0;
   clear_file(fd);
   remove_from_table(fd);
+  current_dir->files_total--;
   return 1;
 }
 
 int FileFindFirst(TFile* info)
 {
-  open_files.last_file = -1;
+  open_files->last_file = -1;
   int file = find_first_from_last();
   if(file == -1)
   {
@@ -950,6 +932,8 @@ void init_open_files(TOpenFiles* g_of_table)
   memset(g_of_table->fd, -1, sizeof(*g_of_table->fd) * OPEN_FILES_MAX);
   memset(g_of_table->block_to_write, -1, sizeof(*g_of_table->block_to_write) * OPEN_FILES_MAX);
   memset(g_of_table->buff_pos, 0, sizeof(*g_of_table->buff_pos) * OPEN_FILES_MAX);
+  memset(g_of_table, -1, sizeof(*g_of_table->mode) * OPEN_FILES_MAX);
+  open_files->last_file = -1;
 }
 
 #ifdef __CREATE_FILE_DEBUG__
@@ -1070,14 +1054,14 @@ void remove_from_table(int fd)
 
 int find_first_from_last()
 {
-  int local = open_files.last_file;
+  int local = open_files->last_file;
   local++;
   while(local < DIR_ENTRIES_MAX && current_dir->files[local].start == -1)
     local++;
   if(local == DIR_ENTRIES_MAX)
     return -1;
-  open_files.last_file = local;
-  return open_files.last_file;
+  open_files->last_file = local;
+  return open_files->last_file;
 }
 
 int segtest(int sector)
