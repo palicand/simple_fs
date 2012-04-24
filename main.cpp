@@ -1,4 +1,3 @@
-#ifndef __PROGTEST__
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -23,20 +22,18 @@ struct TBlkDev
    int          (* m_Read)( int, void *, int );
    int          (* m_Write)( int, const void *, int );
  };
-#endif /* __PROGTEST__ */
 #define EOC 0xFFFFFFFF
 #define SYS 0xFFFFFFFE
 #define SECTORS_PER_BLOCK 8
-#define BLOCK_SIZE SECTORS_PER_BLOCK * SECTOR_SIZE
+#define BLOCK_SIZE (SECTORS_PER_BLOCK * SECTOR_SIZE)
 #define MAGIC_NUMBER 42
-#define __DEBUG__
-//#define __CONVERT__
-//#define __DIR_TEST__
+//#define __DEBUG__
 /*#define __FILE_FIND_DEBUG__
 #define __CREATE_FILE_DEBUG__
 #define __FILE_WRITE_DEBUG__
 #define __FILE_CLOSE_DEBUG__
 #define __FILE_READ_DEBUG__*/
+ //#define __ANOTHER_TEST__
  struct TBlock
  {
   unsigned char block[BLOCK_SIZE];
@@ -45,38 +42,39 @@ struct TBlkDev
 //start oznacuje startovny blok, size je velkost v bytoch
 struct TEntry 
 {
-  unsigned int size;
-  unsigned int start;
+  int size;
+  int start;
   char filename[FILENAME_LEN_MAX+1];
 };
 
  struct TFat
  {
 //kazdy blok ma v sebe odkaz na dalsi blok filu, 0, ak je volny a EOC ak sa jedna o posledny sektor
-  unsigned int magic_number;
-  unsigned int allocated_size;
-  unsigned int * blocks;
-  unsigned int dir_start;
-  unsigned int data_start;
-  unsigned int files_total;
+  int magic_number;
+  int allocated_size;
+  int * blocks;
+  int dir_start;
+  int data_start;
+  int files_total;
   TBlkDev blockDevice;
   TBlock * buffer;
+
+  int mounted;
 };
 
 struct TDir
 {
   TEntry files[DIR_ENTRIES_MAX];
-  unsigned int files_total;
+  int files_total;
 };
 
 //ked sa otvori subor, jeho adresa v pamati sa zapise do files, vytvori sa mu novy buffer na jeho pozicii vo files a jeho fd sa zapise do fd[pos_files]
 struct TOpenFiles
 {
-  TEntry* files[OPEN_FILES_MAX];
   TBlock* buffers[OPEN_FILES_MAX];
   int fd[OPEN_FILES_MAX];
-  unsigned int block_to_write[OPEN_FILES_MAX];
-  unsigned int buff_pos[OPEN_FILES_MAX];
+  int block_to_write[OPEN_FILES_MAX];
+  int buff_pos[OPEN_FILES_MAX];
   int mode[OPEN_FILES_MAX];
   int last_file;
 };
@@ -97,8 +95,6 @@ int     FileFindFirst       ( struct TFile   * info );
 int     FileFindNext        ( struct TFile   * info );
 int     FileSize            ( const char     * fileName );
 
-
-#ifndef __PROGTEST__
 /* Filesystem - sample usage.
  *
  * The testing of the fs driver requires a backend (simulating the underlying disk).
@@ -113,7 +109,7 @@ int     FileSize            ( const char     * fileName );
  * main(), however, the tests are incomplete. Once again, this is only a starting point.
  */
 
-#define DISK_SECTORS DEVICE_SIZE_MIN / 512
+#define DISK_SECTORS (40*1024*1024) / 512
 static FILE  * g_Fp = NULL;
 
 //-------------------------------------------------------------------------------------------------
@@ -155,7 +151,7 @@ TBlkDev          * createDisk                              ( void )
 
    memset    ( buffer, 0, sizeof ( buffer ) );
 
-   g_Fp = fopen ( "/tmp/disk_content", "w+b" );
+   g_Fp = fopen ( "disk_content", "w+b" );
    if ( ! g_Fp ) return NULL;
 
    for ( i = 0; i < DISK_SECTORS; i ++ )
@@ -176,10 +172,8 @@ TBlkDev          * createDisk                              ( void )
 TBlkDev          * openDisk                                ( void )
  {
    TBlkDev  * res = NULL;
-   int        i;
-   char       fn[100];
 
-   g_Fp = fopen ( "/tmp/disk_content", "r+b" );
+   g_Fp = fopen ( "disk_content", "r+b" );
    if ( ! g_Fp ) return NULL;
    fseek ( g_Fp, 0, SEEK_END );
    if ( ftell ( g_Fp ) != DISK_SECTORS * SECTOR_SIZE )
@@ -209,6 +203,22 @@ void               doneDisk                                ( TBlkDev         * d
  }
 //-------------------------------------------------------------------------------------------------
 
+void randContent(char* buffer, int sz)
+{
+  for(int i = 0; i < sz; i++)
+  {
+    char c = rand() % 255 + 1;
+    buffer[i] = c;
+  }
+}
+
+void randFN(char* src)
+{
+  randContent(src, FILENAME_LEN_MAX);
+  src[FILENAME_LEN_MAX] = '\0';
+}
+
+
  void printbuf(char* buf, int len)
  {
   for(int i = 0; i < len; i++)
@@ -217,162 +227,98 @@ void               doneDisk                                ( TBlkDev         * d
   }
   printf("\n");
  }
+
+ void printAllF()
+ {
+    TFile  info;
+    int i = 0;
+    int ret;
+    if ( (ret = FileFindFirst ( &info )) )
+     do 
+      { 
+        printf ( "%d: %s %d\n", i, info . m_FileName, info . m_FileSize );
+        cout << "retcode " << ret << endl;
+        i++;
+      } while ((ret = FileFindNext ( &info )) );
+
+ }
 int main ( void )
  {
    TBlkDev * dev;
-   int       i, fd, retCode;
-   char* buffer = new char[SECTOR_SIZE];
-   TFile     info;
-
+   int       fd, retCode;
+   char file[FILENAME_LEN_MAX + 1];
+   TFile info;
    /* create the disk before we use it
     */
+     srand(time(0));
+
    dev = createDisk ();
    /* The disk is ready at this moment. Your FS-related functions may be executed,
     * the disk backend is ready.
     *
     * First, try to create the filesystem
     */
-    FsCreate(dev);
-            cout << "\n-------------------------------------------------" << endl;
-        retCode = FsMount( dev );
-        cout << "FsMount " << retCode << endl;
-        char *bufferik;
-       
-        cout << "Zapis najednou, nahodna velikost souboru:\n---------------" << endl;
-        srand( time( NULL ) );
-        int max = rand() % 100000 + rand() % 20000, velikost, j = 0;
-        int temp = max;
-        char *spravne2 = new char[ max ];
-        fd = FileOpen( "hjsDFHJK", 1 );
-        velikost = max;
-        bufferik = new char[ velikost ];
-        for( int i = 0; i < velikost; i++ )
-                spravne2[ i ] = bufferik[ i ] = rand() % 255;
-        cout << FileWrite( fd, bufferik, velikost ) << endl;
-        max -= velikost;
-        delete [] bufferik;
-        FileClose( fd );
-       
-        cout << "\nNahodny zapis, fixni velikost souboru 3022B:\n---------------" << endl;
-        srand( time( NULL ) );
-        max = 3022, velikost, j = 0;
-        char *spravne = new char[ max ];
-        fd = FileOpen( "apoisdiajwsSNHF", 1 );
-        while( max > 512 )
-        {
-                cout << "Bajty " << j << "-" << j+velikost << endl;
-                velikost = rand() % 512 + 1;
-                bufferik = new char[ velikost ];
-                for( int i = 0; i < velikost; i++, j++ )
-                        spravne[ j ] = bufferik[ i ] = rand() % 255;
-                FileWrite( fd, bufferik, velikost );
-                max -= velikost;
-                delete [] bufferik;
-        }
-        velikost = max;
-        bufferik = new char[ velikost ];
-        for( int i = 0; i < velikost; i++, j++ )
-                spravne[ j ] = bufferik[ i ] = rand() % 255;
-        FileWrite( fd, bufferik, velikost );
-        max -= velikost;
-        delete [] bufferik;
-        FileClose( fd );
-       
-        cout << "\nTest zapisu, (cteni najednou), fixni velikost souboru 3022B:\n---------------" << endl;
-        fd = FileOpen( "apoisdiajwsSNHF", 0 );
-        cout << "FileSize: " << " r=3022, s=" << FileSize( "apoisdiajwsSNHF" ) << endl;
-        velikost = 3022;
-        bufferik = new char[ velikost ];
-        cout << FileRead( fd, bufferik, velikost ) << endl;
-        cout << "Bajty " << 0 << "-" << velikost << endl;
-        for( int i = 0; i < velikost; i++ )
-                if( spravne[ i ] != bufferik[ i ] )
-                        cout << "+offset " << i << ", r=" << (int) spravne[ i ] << ", s= " << (int) bufferik[ i ] << endl;
-        delete [] bufferik;
-        FileClose( fd );
-       
-       
-        cout << "\nNahodny cteni, fixni velikost souboru 3022B:\n---------------" << endl;
-        max = 3022;
-        j = 0;
-        fd = FileOpen( "apoisdiajwsSNHF", 0 );
-        cout << "FileSize: " << " r=3022, s=" << FileSize( "apoisdiajwsSNHF" ) << endl;
-        while( max > 512 )
-        {
-                velikost = rand() % 512 + 1;
-                bufferik = new char[ velikost ];
-                cout << "Bajty " << j << "-" << j+velikost << endl;            
-                FileRead( fd, bufferik, velikost );
-                for( int i = 0; i < velikost; i++, j++ )
-                        if( spravne[ j ] != bufferik[ i ] )
-                                cout << "+offset " << j << ", r=" << (int) spravne[ j ] << ", s= " << (int) bufferik[ i ] << endl;
-                               
-                max -= velikost;
-                delete [] bufferik;
-        }
-        velikost = max;
-        bufferik = new char[ velikost ];
-        FileRead( fd, bufferik, velikost );
-        cout << "Bajty " << j << "-" << j+velikost << endl;    
-        for( int i = 0; i < velikost; i++, j++ )
-                if( spravne[ j ] != bufferik[ i ] )
-                        cout << "+offset " << j << ", r=" << (int) spravne[ j ] << ", s= " << (int) bufferik[ i ] << endl;     
-        max -= velikost;
-        delete [] bufferik;
-        FileClose( fd );
-       
-        cout << "\nTest zapisu, (cteni najednou), nahodna velikost souboru:\n---------------" << endl;
-        fd = FileOpen( "hjsDFHJK", 0 );
-        cout << "FileSize: " << " r="<< temp << ", s=" << FileSize( "hjsDFHJK" ) << endl;
-        velikost = temp;
-        bufferik = new char[ velikost ];
-        cout << FileRead( fd, bufferik, velikost ) << endl;
-        cout << "Bajty " << 0 << "-" << velikost << endl;
-        for( int i = 0; i < velikost; i++ )
-                if( spravne2[ i ] != bufferik[ i ] )
-                        cout << "+offset " << i << ", r=" << (int) spravne2[ i ] << ", s= " << (int) bufferik[ i ] << endl;
-        delete [] bufferik;
-        FileClose( fd );
-       
-       
-        cout << "\nNahodny cteni, nahodna velikost souboru:\n---------------" << endl;
-        max = temp;
-        j = 0;
-        fd = FileOpen( "hjsDFHJK", 0 );
-        cout << "FileSize: " << " r=" << temp << ", s=" << FileSize( "hjsDFHJK" ) << endl;
-        while( max > 512 )
-        {
-                velikost = rand() % (1024) + 1;
-                bufferik = new char[ velikost ];
-                cout << "Bajty " << j << "-" << j+velikost << endl;            
-                FileRead( fd, bufferik, velikost );
-                for( int i = 0; i < velikost; i++, j++ )
-                        if( spravne2[ j ] != bufferik[ i ] )
-                                cout << "+offset " << j << ", r=" << (int) spravne2[ j ] << ", s= " << (int) bufferik[ i ] << endl;
-                               
-                max -= velikost;
-                delete [] bufferik;
-        }
-        velikost = max;
-        bufferik = new char[ velikost ];
-        FileRead( fd, bufferik, velikost );
-        cout << "Bajty " << j << "-" << j+velikost << endl;    
-        for( int i = 0; i < velikost; i++, j++ )
-                if( spravne2[ j ] != bufferik[ i ] )
-                        cout << "+offset " << j << ", r=" << (int) spravne2[ j ] << ", s= " << (int) bufferik[ i ] << endl;    
-        max -= velikost;
-        delete [] bufferik;
-        FileClose( fd );
-       
-        retCode = FsUmount( );
-        cout << "FsUmount " << retCode << endl;
-       
-        doneDisk( dev );
-        delete [] spravne;
-
+    cout << FsCreate(dev);
+  cout << "\n-------------------------------------------------" << endl;
+  retCode = FsMount( dev );
+  cout << retCode << endl;
+  printAllF();
+  int sz;
+  char* buffer;
+  for(int i = 0; i < 123; i++)
+  {
+    //cout << "iteration " << i << endl;
+    randFN(file);
+    //printf("Filename: %s\n", file);
+    fd = FileOpen(file, 1);
+    cout << "got fd " << fd << "total files: " << current_dir->files_total << endl;
+    if(fd != -1)
+    {
+      sz = rand() % 4096 + 1;
+      buffer = new char[sz];
+      randContent(buffer, sz);
+      //printf("content: ");
+      //printbuf(buffer, sz);
+      //printf("\n");
+      FileWrite(fd, buffer, sz);
+      delete [] buffer;
+      sz = rand() % 4096 + 1;
+      buffer = new char[sz];
+      randContent(buffer, sz);
+      FileWrite(fd, buffer, sz);
+      FileClose(fd);
+      delete [] buffer;
+    }
+  }
+  for(int i = 0; i < 5; i++)
+  {
+    randFN(file);
+    //printf("Filename: %s\n", file);
+    fd = FileOpen(file, 1);
+    cout << "got fd " << fd << "total files: " << current_dir->files_total << endl;
+    if(fd != -1)
+    {
+      sz = rand() % 4096 + 1;
+      buffer = new char[sz];
+      randContent(buffer, sz);
+      //printf("content: ");
+      //printbuf(buffer, sz);
+      //printf("\n");
+      FileWrite(fd, buffer, sz);
+      delete [] buffer;
+      sz = rand() % 4096 + 1;
+      buffer = new char[sz];
+      randContent(buffer, sz);
+      FileWrite(fd, buffer, sz);
+      delete [] buffer;
+    }
+  }
+  printAllF();
+  retCode = FsUmount( );
+  cout << "FsUmount " << retCode << endl;
+  doneDisk( dev );
    return 0;
  }
-#endif
 //manipulacia s FATkou
 void init_fat(TFat* table, const TBlkDev* dev);
 void write_fat(TFat* table);
@@ -382,7 +328,7 @@ bool read_fat(TFat* table, const TBlkDev* dev);
 bool read_fat_info(TFat* fat, const TBlkDev* dev, TBlock* buffer = NULL);
 //manipulacia s blokom
 //naplnime block datami z data, velkost data je size, size nesmie byt vacsi ako BLOCK_SIZE
-void fill_block(TBlock* block, const unsigned int* data, int size);
+void fill_block(TBlock* block, const int* data, int size);
 //naplnime block charom
 void fill_block(TBlock* block, const unsigned char* data, int size);
 //zapisanie bloku src od sektoru start_sector na device dev
@@ -391,23 +337,18 @@ int read_block(TBlock* dest, int start_sector, const TBlkDev* dev);
 void init_block(TBlock* block) { memset(block->block, 0, sizeof(unsigned char)* BLOCK_SIZE); }
 //pomocne blbosti
 //prevod uintu src na pole 4 unsigned charov, aby sme to mohli zapisat - pouzitie v zapise fatky; format little endian
-void intToUChar(unsigned char chunk[4], unsigned int src)
+void intToUChar(unsigned char chunk[4], int src)
 {
-  for(int i = 0; i < 4; i++)
-  {
-    chunk[i] = (unsigned char) src;
-    src >>= 8;
-  }
+  memcpy(chunk, &src, sizeof(int));
 }
 
 int uCharToUint(unsigned char chunk[4])
 {
   int num = 0;
-  for(int i = 3; i >=0; i--)
-  {
-    num += chunk[i];
-    num <<= 8;
-  }
+  memcpy(&num, chunk, sizeof(*chunk));
+  #ifdef __DEBUG__
+  cout << num << endl;
+  #endif
   return num;
 }
 
@@ -423,23 +364,23 @@ int create_file(const char* filename);
 int find_free_fd(const char* filename, int start = 0);
 int find_free_block(int start = 0);
 
-void init_open_files(TOpenFiles* of_table);
+void init_open_files(TOpenFiles* g_of_table);
 
 //prida subor do tabulky otvorenych suborov, v pripade uspechu vracia FD, v pripade neuspechu -1
-int add_to_open_files(int fd, TOpenFiles* of_table);
-void close_files(TOpenFiles* of_table);
-int get_free_index(const TOpenFiles* of_table);
+int add_to_open_files(int fd, TOpenFiles* g_of_table);
+void close_files(TOpenFiles* g_of_table);
+int get_free_index(const TOpenFiles* g_of_table);
 
-int flush_buffer(int fd, const TOpenFiles* of_table);
-void remove_from_open_files(int fd, TOpenFiles* of_table);
+int flush_buffer(int fd, const TOpenFiles* g_of_table);
+void remove_from_open_files(int fd, TOpenFiles* g_of_table);
 
 void clear_file(int fd);
 void remove_from_table(int fd);
 int find_first_from_last();
-int get_open_file_index(int fd, const TOpenFiles* of_table)
+int get_open_file_index(int fd, const TOpenFiles* g_of_table)
 { 
   int i = 0; 
-  while(i < OPEN_FILES_MAX && of_table->fd[i] != fd)
+  while(i < OPEN_FILES_MAX && g_of_table->fd[i] != fd)
     i++;
   if(i == OPEN_FILES_MAX)
     return -1;
@@ -458,7 +399,7 @@ int get_open_file_index(int fd, const TOpenFiles* of_table)
 
   #ifdef __DEBUG__
   printf("\n%u %u\n", table->dir_start, table->data_start);
-  printf("%d, %d, %lu, %d\n", dev->m_Sectors, SECTORS_PER_BLOCK, sizeof(unsigned int), BLOCK_SIZE);
+  printf("%d, %d, %lu, %d\n", dev->m_Sectors, SECTORS_PER_BLOCK, sizeof(int), BLOCK_SIZE);
   #endif
 
   init_dir(root);
@@ -476,7 +417,17 @@ int FsMount(TBlkDev* dev)
   #endif
   TFat * table = new TFat;
   if(!read_fat(table, dev))
+  {
+    delete table;
     return 0;
+  }
+  if(table->mounted == 1)
+  {
+    delete table;
+    return 0;
+  }
+  table->mounted = 1;
+  table->blockDevice = *dev;
   //pretoze sme pri nacitavani FATky zmenili umiestnenie bufferu a table, musime zapisat ich adresu na disk
   write_fat_info(table);
   #ifdef __DEBUG__
@@ -484,7 +435,11 @@ int FsMount(TBlkDev* dev)
   #endif
   TDir * root = new TDir;
   if(!read_dir(root, table))
+  {
+    delete table;
+    delete root;
     return 0;
+  }
   current_table = table;
   current_dir = root;
   init_open_files(&open_files);
@@ -493,9 +448,14 @@ int FsMount(TBlkDev* dev)
 
 int FsUmount()
 {
-  write_fat(current_table);
-  write_dir(current_dir, &current_table->blockDevice, current_table->dir_start, current_table->buffer);
+  if(current_table == NULL)
+    return 0;
+  if(current_table->mounted == 0)
+    return 0;
+  current_table->mounted = 0;
   close_files(&open_files);
+  write_dir(current_dir, &current_table->blockDevice, current_table->dir_start, current_table->buffer);
+  write_fat(current_table);
   destroy_fat(current_table);
   delete current_dir;
   delete current_table;
@@ -527,29 +487,42 @@ int FileOpen(const char* filename, int writeMode)
       clear_file(fd);
     }
   }
-  open_files.mode[fd] = writeMode;
-  return add_to_open_files(fd, &open_files);
+  if(fd == -1)
+  {
+    #ifdef __ANOTHER_TEST__
+    cout << "did not create file\n";
+    #endif
+    return -1;
+  }
+  int ret = add_to_open_files(fd, &open_files);
+  open_files.mode[get_open_file_index(fd, &open_files)] = writeMode;
+  return ret;
 }
 
 int FileClose(int fd)
 {
+  int index = get_open_file_index(fd, &open_files);
+  #ifdef __ANOTHER_TEST__
+  cout << "passed " << fd << "got " <<  index << "while closing " << endl;
+  #endif
+  if(open_files.fd[index] == -1)
+    return -1;
   #ifdef __FILE_CLOSE_DEBUG__
     printf("closing file %d\n", fd);
   #endif
   //vyprazdnime buffer
-  if(open_files.mode[fd] == 1)
+  if(open_files.mode[index] == 1)
     flush_buffer(fd, &open_files);
   //a subor odstranime z tabulky a upraceme
-  remove_from_open_files(fd, &open_files);
+  remove_from_open_files(index, &open_files);
   return 1;
 }
 
 int FileRead(int fd, void* buffer, int len)
 {
   int file_index = get_open_file_index(fd, &open_files);
-  if(file_index == -1)
+  if(file_index == -1 && open_files.mode[file_index] != 0)
   {
-    printf("fileindex = -1\n");
     return 0;
   }
   #ifdef __FILE_READ_DEBUG__
@@ -557,8 +530,8 @@ int FileRead(int fd, void* buffer, int len)
   #endif
   //inde suboru v tabulke otvorenych suborov
   //spravim si buffer, do ktoreho budem vsetko kopirovat
-  unsigned char* temp_buf = new unsigned char[len];
-  memset(temp_buf, 0, len);
+  /*unsigned char* temp_buf = new unsigned char[len];
+  memset(temp_buf, 0, len);*/
   //kde som v konecnom bufferi
   int destPos = 0;
   //velkost, ktoru musim nacitat
@@ -586,7 +559,7 @@ int FileRead(int fd, void* buffer, int len)
     #endif
     //nacitame blok
     read_block(open_files.buffers[file_index], block * SECTORS_PER_BLOCK, &current_table->blockDevice);
-    memcpy(temp_buf + destPos, open_files.buffers[file_index]->block + pos_in_block, size_to_read);
+    memcpy((unsigned char*) buffer + destPos, open_files.buffers[file_index]->block + pos_in_block, size_to_read);
     #ifdef __FILE_READ_DEBUG__
     printf("copied from position %d in src buffer to position %d in dest buffer\n", pos_in_block, destPos);
     #endif
@@ -596,27 +569,28 @@ int FileRead(int fd, void* buffer, int len)
     if(pos_in_block == BLOCK_SIZE)
     {
       pos_in_block = 0;
+      #ifdef __FILE_READ_DEBUG__
+      printf("current block %d, next block %d\n", block, current_table->blocks[block]);
+      #endif
       block = current_table->blocks[block];
       rel_block++;
     }
   }
-  memcpy(buffer, temp_buf, destPos);
-  delete [] temp_buf;
   return destPos;
 }
 
 int FileWrite(int fd, const void* buffer, int len)
 {
   int file_index = get_open_file_index(fd, &open_files);
-  if(file_index == -1 || open_files.mode[fd] != 1)
+  if(file_index == -1 || open_files.mode[file_index] != 1)
     return 0;
   #ifdef __FILE_WRITE_DEBUG__
   printf("writing file %d\n", fd);
   #endif
   int srcPos = 0;
   int sizeToWrite = 0;
-  unsigned char* temp_buf = new unsigned char[len];
-  memcpy(temp_buf, buffer, len * sizeof(unsigned char));
+  /*unsigned char* temp_buf = new unsigned char[len];
+  memcpy(temp_buf, buffer, len * sizeof(unsigned char));*/
   while(srcPos != len)
   {
     /*musime zistit, kolko zo zdrojoveho bufferu nakopirujeme do nasho, musi to byt velkost, ktora co najviac naplni nas buffer,
@@ -627,7 +601,7 @@ int FileWrite(int fd, const void* buffer, int len)
     #ifdef __FILE_WRITE_DEBUG__
     printf("will write %d bytes, to bufpos %d from srcpos %d\n", sizeToWrite, open_files.buff_pos[file_index], srcPos);
     #endif
-    memcpy(open_files.buffers[file_index]->block + open_files.buff_pos[file_index], temp_buf + srcPos, sizeToWrite);
+    memcpy(open_files.buffers[file_index]->block + open_files.buff_pos[file_index], (unsigned char*)buffer + srcPos, sizeToWrite);
     open_files.buff_pos[file_index] += sizeToWrite;
     srcPos += sizeToWrite;
     //naplnili sme buffer
@@ -635,7 +609,7 @@ int FileWrite(int fd, const void* buffer, int len)
     {
       //teraz hu musime zapisat na disk a to na poziciu, na ktorej akurat sme, kedze ta j evzdy prazdna
       int ret;
-      if((ret = flush_buffer(file_index, &open_files)) != SECTORS_PER_BLOCK)
+      if((ret = flush_buffer(fd, &open_files)) != SECTORS_PER_BLOCK)
       {
         #ifdef __FILE_WRITE_DEBUG__
         printf("wrote %d bytes while flushing\n", ret);
@@ -644,6 +618,8 @@ int FileWrite(int fd, const void* buffer, int len)
         return srcPos;
       }
       //dostaneme ziskame novy blok
+      if(srcPos == len)
+        break;
       int new_block = find_free_block();
       #ifdef __FILE_WRITE_DEBUG__
       printf("got new block %d\n", new_block);
@@ -662,7 +638,7 @@ int FileWrite(int fd, const void* buffer, int len)
       open_files.buff_pos[file_index] = 0;
     }
   }
-  delete [] temp_buf;
+  //delete [] temp_buf;
   current_dir->files[fd].size += srcPos;
   return srcPos;
 }
@@ -682,7 +658,9 @@ int FileFindFirst(TFile* info)
   open_files.last_file = -1;
   int file = find_first_from_last();
   if(file == -1)
+  {
     return 0;
+  }
   strcpy(info->m_FileName, current_dir->files[file].filename);
   info->m_FileSize = current_dir->files[file].size;
   return 1;
@@ -711,10 +689,12 @@ void init_fat(TFat* table, const TBlkDev* dev)
   memset(table, 0, sizeof(*table));
   table->magic_number = MAGIC_NUMBER;
   table->allocated_size = dev->m_Sectors / SECTORS_PER_BLOCK;
-  table->blocks = new unsigned int[table->allocated_size]();
-  table->blockDevice = *dev;
+  table->blocks = new int[table->allocated_size]();
+  table->blockDevice.m_Read = dev->m_Read;
+  table->blockDevice.m_Write = dev->m_Write;
+  table->blockDevice.m_Sectors = dev->m_Sectors;
   // je mi jasne, ze by sa to dalo zapisat do jedneho vyrazu, ale z nejakeho dovodu mi to strasne blblo a vyhadzovalo nezmyselne cislo, takze som vypocet dir_start radsej rozdelil
-  table->dir_start = sizeof(unsigned int) * table->blockDevice.m_Sectors;
+  table->dir_start = sizeof(int) * table->blockDevice.m_Sectors;
   table->dir_start /= BLOCK_SIZE;
   table->dir_start += SECTORS_PER_BLOCK;
   table->data_start = table->dir_start + 2*SECTORS_PER_BLOCK;
@@ -722,10 +702,11 @@ void init_fat(TFat* table, const TBlkDev* dev)
   table->buffer = new TBlock;
   init_block(table->buffer);
   table->files_total = 0;
-  for(unsigned i = 0; i < table->data_start / SECTORS_PER_BLOCK; i++)
+  for(int i = 0; i < table->data_start / SECTORS_PER_BLOCK; i++)
   {
     table->blocks[i] = SYS;
   }
+  table->mounted = 0;
 }
 
 void write_fat(TFat* table)
@@ -734,7 +715,7 @@ void write_fat(TFat* table)
   int start_sector = SECTORS_PER_BLOCK;
   int size_to_write = BLOCK_SIZE / 4;
   //tabulka sektorov
-  for(unsigned int i = 0; i < table->allocated_size; i += size_to_write)
+  for(int i = 0; i < table->allocated_size; i += size_to_write)
   {
     init_block(table->buffer);
     if((i + BLOCK_SIZE / 4) > table->allocated_size)
@@ -755,7 +736,7 @@ void write_fat_info(TFat* table)
   write_block(table->buffer, 0, &table->blockDevice);
 }
 
-void fill_block(TBlock* block, const unsigned int* data, int size)
+void fill_block(TBlock* block, const int* data, int size)
 {
   unsigned char chunk[4];
   int start_pos = 0;
@@ -790,6 +771,7 @@ int read_block(TBlock* dest, int start_sector, const TBlkDev* dev)
 
 void init_dir(TDir* dir)
 {
+  memset(dir, 0, sizeof(*dir));
   dir->files_total = 0;
   for(int i = 0; i < DIR_ENTRIES_MAX; i++)
   {
@@ -822,12 +804,8 @@ void write_dir(const TDir* dir, const TBlkDev* dev, int sector, TBlock* buffer)
 
 bool read_fat_info(TFat* fat, const TBlkDev* dev, TBlock* buffer)
 {
-  bool now_allocated = false;
-  if(buffer == NULL)
-  {
-    buffer = new TBlock;
-    now_allocated = true;
-  }
+  buffer = new TBlock;
+  init_block(buffer);
   read_block(buffer, 0, dev);
   memcpy(fat, buffer, sizeof(TFat));
   #ifdef __DEBUG__
@@ -835,17 +813,13 @@ bool read_fat_info(TFat* fat, const TBlkDev* dev, TBlock* buffer)
   #endif
   if(fat->magic_number != MAGIC_NUMBER)
     return false;
-  if(now_allocated)
-  {
-    fat->buffer = buffer;
-    fat->blocks = new unsigned int[fat->allocated_size];
-  }
+  fat->buffer = buffer;
+  fat->blocks = new int[fat->allocated_size];
   return true;
 }
 
 bool read_fat(TFat* fat, const TBlkDev* dev)
 {
-
   //nacitame informacie
   if(!read_fat_info(fat, dev))
     return false;
@@ -855,16 +829,16 @@ bool read_fat(TFat* fat, const TBlkDev* dev)
   int start_sector = SECTORS_PER_BLOCK;
   //i indexuje buffer, j indexuje fat->blocks
   int i = 0, j = 0;
-  unsigned char chunk[sizeof(unsigned int)];
+  unsigned char chunk[sizeof(int)];
   //nacitame samotnu tabulku
   while(start_sector < fat->dir_start)
   {
     memset(fat->buffer->block, 0, BLOCK_SIZE);
     read_block(fat->buffer, start_sector, dev);
     start_sector += SECTORS_PER_BLOCK;
-    for(i = 0; i < BLOCK_SIZE; i += sizeof(unsigned int))
+    for(i = 0; i < BLOCK_SIZE; i += sizeof(int))
     {
-      memcpy(chunk, fat->buffer->block + i, sizeof(unsigned int));
+      memcpy(chunk, fat->buffer->block + i, sizeof(int));
       fat->blocks[j] = uCharToUint(chunk);
       j++;
     }
@@ -877,6 +851,7 @@ bool read_dir(TDir* dir, TFat* table)
   int i = 0;
   int start_sector = table->dir_start;
   int size_to_copy = BLOCK_SIZE / sizeof(TEntry);
+  dir->files_total = table->files_total;
   while(i < DIR_ENTRIES_MAX)
   {
     init_block(table->buffer);
@@ -913,12 +888,16 @@ int find_file(const char* file_name)
 
 int create_file(const char* filename)
 {
-  current_dir->files_total = current_table->files_total;
   #ifdef __CREATE_FILE_DEBUG__
   printf("creating file, total files: %d\n", current_dir->files_total);
   #endif
   if(current_dir->files_total == DIR_ENTRIES_MAX)
+  {
+    #ifdef __ANOTHER_TEST__
+    cout << "too much files, exiting\n";
+    #endif
     return -1;
+  }
   int fd = find_free_fd(filename);
   #ifdef __FILE_FIND_DEBUG__
   printf("fd: %d\n", fd);
@@ -937,6 +916,7 @@ int create_file(const char* filename)
   current_dir->files[fd].size = 0;
   strcpy(current_dir->files[fd].filename, filename);
   current_dir->files_total++;
+  current_table->files_total = current_dir->files_total;
   return fd;
 }
 
@@ -964,107 +944,112 @@ int find_free_block(int start)
   return start;
 }
 
-void init_open_files(TOpenFiles* of_table)
+void init_open_files(TOpenFiles* g_of_table)
 {
-  memset(of_table->buffers, NULL, sizeof(TBlock*) * OPEN_FILES_MAX);
-  memset(of_table->files, NULL, sizeof(TEntry*) * OPEN_FILES_MAX);
-  memset(of_table->fd, -1, sizeof(*of_table->fd) * OPEN_FILES_MAX);
-  memset(of_table->block_to_write, -1, sizeof(*of_table->block_to_write) * OPEN_FILES_MAX);
-  memset(of_table->buff_pos, 0, sizeof(*of_table->buff_pos) * OPEN_FILES_MAX);
+  memset(g_of_table->buffers, 0, sizeof(TBlock*) * OPEN_FILES_MAX);
+  memset(g_of_table->fd, -1, sizeof(*g_of_table->fd) * OPEN_FILES_MAX);
+  memset(g_of_table->block_to_write, -1, sizeof(*g_of_table->block_to_write) * OPEN_FILES_MAX);
+  memset(g_of_table->buff_pos, 0, sizeof(*g_of_table->buff_pos) * OPEN_FILES_MAX);
 }
 
 #ifdef __CREATE_FILE_DEBUG__
-void printOTable(const TOpenFiles* of_table)
+void printOTable(const TOpenFiles* g_of_table)
 {
   for(int i = 0; i < OPEN_FILES_MAX; i++)
   {
-    printf("%d, fd:%d\n", i, of_table->fd[i]);
+    printf("%d, fd:%d\n", i, g_of_table->fd[i]);
   }
 }
 #endif
 
-int add_to_open_files(int fd, TOpenFiles* of_table)
+int add_to_open_files(int fd, TOpenFiles* g_of_table)
 {
   #ifdef __CREATE_FILE_DEBUG__
-  printOTable(of_table);
+  printOTable(g_of_table);
   #endif
-  int index = get_free_index(of_table);
+  int index = get_free_index(g_of_table);
   #ifdef __CREATE_FILE_DEBUG__
   printf("got index %d\n", index);
   #endif
   //nebolo volne miesto pre otvoreny subor
   if(index == -1)
+  {
+    printf("no space\n");
     return -1;
+  }
   #ifdef __CREATE_FILE_DEBUG__
   printf("adding file %d to table\n", fd);
   #endif
-  of_table->buffers[index] = new TBlock;
-  init_block(of_table->buffers[index]);
-  of_table->files[index] = &current_dir->files[fd];
-  of_table->fd[index] = fd;
-  of_table->block_to_write[index] = of_table->files[index]->start;
+  g_of_table->buffers[index] = new TBlock;
+  init_block(g_of_table->buffers[index]);
+  g_of_table->fd[index] = fd;
+  g_of_table->block_to_write[index] = current_dir->files[fd].start;
   #ifdef __CREATE_FILE_DEBUG__
   printf("after add\n");
-  printOTable(of_table);
+  printOTable(g_of_table);
   #endif
   return fd;
 }
 
 
-int get_free_index(const TOpenFiles* of_table)
+int get_free_index(const TOpenFiles* g_of_table)
 {
   int i = 0;
-  while(i < OPEN_FILES_MAX && of_table->fd[i] != -1)
+  while(i < OPEN_FILES_MAX && g_of_table->fd[i] != -1)
     i++;
   if(i == OPEN_FILES_MAX)
     return -1;
   return i;
 }
 
-void close_files(TOpenFiles* of_table)
+void close_files(TOpenFiles* g_of_table)
 {
   for(int i = 0; i < OPEN_FILES_MAX; i++)
   {
-    if(of_table->fd[i] != -1)
+    #ifdef __ANOTHER_TEST__
+    cout << g_of_table->fd[i] << endl;
+    #endif
+    if(g_of_table->fd[i] != -1)
     {
       #ifdef __FILE_CLOSE_DEBUG__
-      printf("closing file %d\n", of_table->fd[i]);
+      printf("closing file %d\n", g_of_table->fd[i]);
       #endif
-     FileClose(i);
+      #ifdef __ANOTHER_TEST__
+      cout << "found open file while unmounting, closing\n";
+      #endif
+      FileClose(g_of_table->fd[i]);
     }
   }
 }
 
-int flush_buffer(int fd, const TOpenFiles* of_table)
+int flush_buffer(int fd, const TOpenFiles* g_of_table)
 {
-  unsigned int file_index = get_open_file_index(fd, of_table);
+  int file_index = get_open_file_index(fd, g_of_table);
   #ifdef __FILE_WRITE_DEBUG__
-  printf("flushing buffer of %d in sector %lu\n", fd, of_table->block_to_write[file_index]*SECTORS_PER_BLOCK);
+  printf("flushing buffer of %d in sector %lu\n", fd, g_of_table->block_to_write[file_index]*SECTORS_PER_BLOCK);
   #endif
-  int size_written = write_block(of_table->buffers[file_index], of_table->block_to_write[file_index]*SECTORS_PER_BLOCK, &current_table->blockDevice);
-  init_block(of_table->buffers[file_index]);
+  int size_written = write_block(g_of_table->buffers[file_index], g_of_table->block_to_write[file_index]*SECTORS_PER_BLOCK, &current_table->blockDevice);
+  init_block(g_of_table->buffers[file_index]);
   return size_written;
 }
 
-void remove_from_open_files(int fd, TOpenFiles* of_table)
+void remove_from_open_files(int file_index, TOpenFiles* g_of_table)
 {
-  int file_index = get_open_file_index(fd, of_table);
   #ifdef __FILE_CLOSE_DEBUG__
-  printf("removing file %d from of_table, position %d\n", fd, file_index);
+  printf("removing file %d from g_of_table, position %d\n", open_files.fd[file_index], file_index);
   #endif
-  of_table->block_to_write[file_index] = -1;
-  of_table->buff_pos[file_index] = 0;
-  of_table->fd[file_index] = -1;
-  of_table->files[file_index] = NULL;
-  delete of_table->buffers[file_index];
-  of_table->buffers[file_index] = NULL;
+  g_of_table->block_to_write[file_index] = -1;
+  g_of_table->buff_pos[file_index] = 0;
+  g_of_table->fd[file_index] = -1;
+  delete g_of_table->buffers[file_index];
+  g_of_table->buffers[file_index] = NULL;
 }
 
 void clear_file(int fd)
 {
   int current_block = current_dir->files[fd].start;
   int next_block = current_table->blocks[current_block];
-  while(next_block != EOC)
+  while(next_block != (int)EOC)
   {
     current_table->blocks[current_block] = 0;
     current_block = next_block;
@@ -1085,10 +1070,21 @@ void remove_from_table(int fd)
 
 int find_first_from_last()
 {
-  open_files.last_file++;
-  while(open_files.last_file < DIR_ENTRIES_MAX && current_dir->files[open_files.last_file].start == -1)
-    open_files.last_file++;
-  if(open_files.last_file == DIR_ENTRIES_MAX)
+  int local = open_files.last_file;
+  local++;
+  while(local < DIR_ENTRIES_MAX && current_dir->files[local].start == -1)
+    local++;
+  if(local == DIR_ENTRIES_MAX)
     return -1;
+  open_files.last_file = local;
   return open_files.last_file;
+}
+
+int segtest(int sector)
+{
+  TBlock* temp = new TBlock;
+  init_block(temp);
+  write_block(temp, sector, &current_table->blockDevice);
+  delete temp;
+  return 1;
 }
