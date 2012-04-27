@@ -249,6 +249,10 @@ int FileWrite(int fd, const void* data, int len)
 int FileDelete(const char* fileName)
 {
   int index = find_file(fileName);
+  if(index == -1)
+  {
+    return 0;
+  }
   clear_file(index);
   g_info->table.blocks[g_info->root.files[index].start_block] = 0;
   remove_file(index);
@@ -583,8 +587,8 @@ void remove_file(int index)
  * main(), however, the tests are incomplete. Once again, this is only a starting point.
  */
 
-//#define DISK_SECTORS (8*1024*1024) / 512
- #define DISK_SECTORS 78985
+#define DISK_SECTORS (8*1024*1024) / 512
+ //#define DISK_SECTORS 78985
 static FILE  * g_Fp = NULL;
 
 //-------------------------------------------------------------------------------------------------
@@ -777,125 +781,62 @@ int FileReadR( int fd, char * buffer, int len ){
   return read;
 }
 int main ( int argc, char** argv )
- {
-   TBlkDev * dev;
-   int fd[OPEN_FILES_MAX];
-   int index;
-   char files[OPEN_FILES_MAX][FILENAME_LEN_MAX + 1];
-   srand(time(0));
-   dev = createDisk();
-   FsCreate(dev);
-   FsMount(dev);
-   int limit = rand() % 4569 + 2048;
-   int ref_sz[OPEN_FILES_MAX] = {0};
-   int written_sz[OPEN_FILES_MAX] = {0};
-   int sz;
-   int this_sz = 0;
-   cout << "TEntry: " << sizeof(TEntry) << endl;
-   for(int i = 0; i < OPEN_FILES_MAX; i++)
-   {
-     randFN(files[i]);
-     cout << "openning file for write: " << files[i];
-     fd[i] = FileOpen(files[i], 1);
-     cout << "got fd " << fd[i] << endl;
-   }
-   char* bufer;
-   for(int i = 0; i < 100; i++)
-   {
-     index = rand() % 8;
-     sz = rand() % limit;
-     bufer = new char[sz];
-     randContent(bufer, sz);
-     ref_sz[index] += sz;
-     written_sz[index] += FileWrite(index, bufer, sz);
-     delete [] bufer;
-   }
+{
+  TBlkDev* dev;
+  char files[DIR_ENTRIES_MAX][29];
+  //int fd[OPEN_FILES_MAX];
+  int fd;
+  int to_do;
 
-   for(int i = 0; i < OPEN_FILES_MAX; i++)
-   {
-     FileClose(i);
-     cout << ref_sz[i] << " " << written_sz[i] << endl;
-   }
+  srand(time(0));
 
-   for(int i = 0; i < OPEN_FILES_MAX; i++)
-   {
-     cout << "openning file for read: " << files[i];
-     fd[i] = FileOpen(files[i], 0);
-     cout << "got fd " << fd[i] << endl;
-   }
+  dev = createDisk();
+  FsCreate(dev);
+  FsMount(dev);
+  for(int i = 0; i < DIR_ENTRIES_MAX; i++)
+  {
+    randFN(files[i]);
+    int loc_fd = FileOpen(files[i], 1);
+    FileClose(loc_fd);
+  }
+  int index;
+  int sz;
+  char* buffer;
+  for(int i = 0; i < 1000; i++)
+  {
 
-   int read_sz[OPEN_FILES_MAX] = { 0 };
-   for(int i = 0; i < 100; i++)
-   {
-     index = rand() % 8;
-     sz = rand() % limit;
-     bufer = new char[sz];
-     this_sz = FileRead(index, bufer, sz);
-     read_sz[index] += this_sz;
-     //printbuf(bufer, this_sz);
-     delete [] bufer;
-   }
-
-   for(int i = 0; i < OPEN_FILES_MAX; i++)
-   {
-     FileClose(i);
-     cout << ref_sz[i] << " " << read_sz[i] << endl;
-   }
-   TFile  info;
-   if ( FileFindFirst ( &info ) )
-    do 
-    { 
-      printf ( "%s %d\n", info . m_FileName, info . m_FileSize );
-    } while ( FileFindNext ( &info ) );
-
-
-
-
-    memset(ref_sz, 0, sizeof(int) * 8);
-    for(int i = 0; i < OPEN_FILES_MAX; i++)
-   {
-     randFN(files[i]);
-     cout << "openning file for write: " << files[i];
-     fd[i] = FileOpen(files[i], 1);
-     cout << "got fd " << fd[i] << endl;
-   }
-   for(int i = 0; i < 100; i++)
-   {
-     index = rand() % 8;
-     sz = rand() % limit;
-     bufer = new char[sz];
-     randContent(bufer, sz);
-     ref_sz[index] += sz;
-     written_sz[index] += FileWrite(index, bufer, sz);
-     delete [] bufer;
-   }
-
-   for(int i = 0; i < OPEN_FILES_MAX; i++)
-   {
-     FileClose(i);
-     cout << ref_sz[i] << " " << written_sz[i] << endl;
-   }
-
-   for(int i = 0; i < OPEN_FILES_MAX; i++)
-   {
-     cout << "openning file for read: " << files[i];
-     fd[i] = FileOpen(files[i], 0);
-     cout << "got fd " << fd[i] << endl;
-   }
-   memset(read_sz, 0, 8*4);
-   for(int i = 0; i < 100; i++)
-   {
-     index = rand() % 8;
-     sz = rand() % limit;
-     bufer = new char[sz];
-     this_sz = FileRead(index, bufer, sz);
-     read_sz[index] += this_sz;
-     //printbuf(bufer, this_sz);
-     delete [] bufer;
-   }
-   cout << "nonexisting: " << FileOpen("hlupak", 0) << endl;
-   FsUmount();
-   doneDisk(dev);
-   return 0;
- }
+    to_do = rand() % 3;
+    index = rand() % 128;
+    if(to_do == 0)
+    {
+      fd = FileOpen(files[index], to_do);
+      sz = rand() % 16384 + 1;
+      buffer = new char[sz];
+      cout << "reading " << index << " " << FileRead(fd, buffer, sz) << endl;
+      FileClose(fd);
+      delete [] buffer;
+    }
+    else if(to_do == 1)
+    {
+      fd = FileOpen(files[index], to_do);
+      sz = rand() % 16384 + 1;
+      buffer = new char[sz];
+      randContent(buffer, sz);
+      cout << "writing " << index << " " << FileWrite(fd, buffer, sz) << endl;
+      FileClose(fd);
+      delete [] buffer;
+    }
+    else
+    {
+      cout << "deleting\n";
+      FileDelete(files[index]);
+      randFN(files[index]);
+      fd = FileOpen(files[index], 1);
+      FileClose(fd);
+    }
+  }
+  FsUmount();
+  doneDisk(dev);
+  return 0;
+}
 #endif
